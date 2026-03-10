@@ -8,6 +8,13 @@ data/trash/
 .env
 .env.local
 
+# Local workspaces / scratch
+workspace/
+
+# Local backups
+app/server.py.bak-*
+app/server.py.before-*
+
 # Python
 __pycache__/
 *.pyc

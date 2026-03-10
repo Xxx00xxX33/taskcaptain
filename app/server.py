@@ -1134,6 +1134,106 @@ def build_chat_completions_url(base: str) -> str:
     return f'{base}/chat/completions'
 
 
+def infer_project_kind(cfg: dict, user_context: str = '') -> str:
+    text = ' '.join([
+        str(cfg.get('name', '')),
+        str(cfg.get('goal', '')),
+        str(user_context or ''),
+    ]).lower()
+    if any(k in text for k in ['算法', 'algorithm', '优化', 'optimization', 'theory', 'theoretical', 'idea', 'proof', 'benchmark', '性能', '复杂度', '收敛', 'search strategy']):
+        return 'algorithm_research'
+    if any(k in text for k in ['frontend', '前端', '页面', 'dashboard', 'demo', '界面', '交互', '库存', '订单', '采购', '台']):
+        return 'frontend_demo'
+    if any(k in text for k in ['api', 'backend', '后端', 'server', '服务', '数据库', '接口']):
+        return 'backend_service'
+    if any(k in text for k in ['script', 'cli', '命令行', '批处理', 'automation', '工具']):
+        return 'script_tool'
+    if any(k in text for k in ['文档', 'docs', 'readme', '手册', '教程', 'spec']):
+        return 'docs_or_spec'
+    return 'general_software'
+
+
+def project_acceptance_profile(kind: str) -> dict:
+    profiles = {
+        'frontend_demo': {
+            'delivery_bar': [
+                'Project structure exists and is non-empty.',
+                'There is a documented local startup path.',
+                'The main UI renders in Chinese (or the requested language) and is not blank.',
+                'Core pages/modules requested by the user are present.',
+                'At least one real interaction or workflow is verified.',
+                'README includes install/start/demo steps and verification notes.',
+            ],
+            'stretch_bar': [
+                'Browser-level automated acceptance coverage exists.',
+                'UI polish and advanced regression checks are present.',
+                'Extended data persistence or more advanced UX checks are covered.',
+            ],
+            'verification_focus': 'Prefer build/start/browser/http verification and key-file inspection. Do not block delivery only because stretch-bar browser automation is missing if delivery-bar evidence is already strong.',
+        },
+        'backend_service': {
+            'delivery_bar': [
+                'Service starts locally with documented instructions.',
+                'At least one key endpoint or workflow is exercised successfully.',
+                'Configuration/README is sufficient for local use.',
+                'Core data flow and expected outputs are demonstrated.',
+            ],
+            'stretch_bar': [
+                'Automated test suite coverage is added.',
+                'Load/error-handling cases are documented or tested.',
+            ],
+            'verification_focus': 'Prefer startup logs, HTTP status checks, smoke tests, and configuration correctness.',
+        },
+        'script_tool': {
+            'delivery_bar': [
+                'The tool runs locally with a documented command.',
+                'Representative input/output behavior is demonstrated.',
+                'README explains usage and limitations.',
+            ],
+            'stretch_bar': [
+                'Extra automation, packaging, or edge-case coverage is added.',
+            ],
+            'verification_focus': 'Prefer CLI execution evidence, deterministic examples, and output inspection.',
+        },
+        'docs_or_spec': {
+            'delivery_bar': [
+                'Core requested documents/specs exist and are coherent.',
+                'Structure, scope, and examples are sufficient for use.',
+            ],
+            'stretch_bar': [
+                'Extended polish, diagrams, or exhaustive examples are added.',
+            ],
+            'verification_focus': 'Prefer direct file-content inspection over build/runtime checks.',
+        },
+        'algorithm_research': {
+            'delivery_bar': [
+                'The hypothesis/idea is clearly stated.',
+                'A concrete method or algorithm design is produced.',
+                'There is an evaluation plan or experiment design.',
+                'There is at least one implementation artifact, derivation artifact, benchmark artifact, or falsification result.',
+                'The result clearly states whether the idea appears promising, inconclusive, or ineffective.',
+            ],
+            'stretch_bar': [
+                'There are broader benchmarks, stronger proofs, more baselines, or more complete ablations.',
+                'There is a stronger implementation/performance package beyond the minimum validation needed for the current idea.',
+            ],
+            'verification_focus': 'Do not treat “not fully proven” as automatic failure. For research/theory work, delivery can be a well-supported negative result, an inconclusive result, a benchmark report, a derivation, or a prototype with evidence. Judge validity of the idea, rigor of reasoning, and whether the current iteration produced meaningful evidence.',
+        },
+        'general_software': {
+            'delivery_bar': [
+                'Non-empty project artifacts exist.',
+                'There is a documented way to run or inspect the result.',
+                'Core requested capability is demonstrated with evidence.',
+            ],
+            'stretch_bar': [
+                'Additional polish, automation, or stronger testing is added.',
+            ],
+            'verification_focus': 'Prefer pragmatic evidence of use over perfection.',
+        },
+    }
+    return profiles.get(kind, profiles['general_software'])
+
+
 def openai_chat_completion(base_url: str, api_key: str | None, model: str, messages: list[dict], timeout: int = 120) -> tuple[str, dict]:
     url = build_chat_completions_url(base_url)
     if not url:
@@ -1316,6 +1416,23 @@ def run_supervision_loop(product_id: str, run_id: str, stop_event: threading.Eve
         }
 
     def default_codex_task(turn: int, files: list[str]) -> str:
+        if project_kind == 'algorithm_research':
+            if not files:
+                return (
+                    f"Work on the algorithm/research task '{cfg.get('name')}' inside the current working directory.\n"
+                    f"Goal: {cfg.get('goal')}\n"
+                    "The workspace is empty. First create concrete research artifacts immediately instead of only discussing ideas.\n"
+                    "Create at minimum: README.md plus one or more of: notes.md, experiment_plan.md, benchmark.py, prototype.py, analysis.md.\n"
+                    "Your task is to make the idea testable: formalize the hypothesis, define success/failure criteria, add a benchmark or experiment scaffold, and produce an initial implementation/analysis artifact.\n"
+                    "A meaningful negative result, inconclusive result, or falsification can still be valuable if clearly supported by evidence.\n"
+                    "Reply with a concise summary of CHANGES, VERIFICATION, and REMAINING."
+                )
+            return (
+                f"Continue the algorithm/research task '{cfg.get('name')}' in the current working directory.\n"
+                f"Goal: {cfg.get('goal')}\n"
+                "Prefer producing stronger evidence over polishing prose: improve the prototype, run benchmarks, tighten reasoning, compare alternatives, or document why the idea does or does not work.\n"
+                "Reply with a concise summary of CHANGES, VERIFICATION, and REMAINING blockers."
+            )
         if not files:
             return (
                 f"Build the smallest runnable demo for '{cfg.get('name')}' inside the current working directory.\n"
@@ -1370,6 +1487,8 @@ def run_supervision_loop(product_id: str, run_id: str, stop_event: threading.Eve
 
         st = load_product_state(product_id)
         user_context = summarize_user_claw_messages(st)
+        project_kind = infer_project_kind(cfg, user_context)
+        acceptance_profile = project_acceptance_profile(project_kind)
         progress_idle_grace = int(os.environ.get('TASKCAPTAIN_PROGRESS_IDLE_GRACE_SECONDS', '1800'))
         progress_deadlock_guard = int(os.environ.get('TASKCAPTAIN_PROGRESS_DEADLOCK_SECONDS', '43200'))
         progress_poll_seconds = float(os.environ.get('TASKCAPTAIN_PROGRESS_POLL_SECONDS', '2'))
@@ -1381,15 +1500,20 @@ def run_supervision_loop(product_id: str, run_id: str, stop_event: threading.Eve
         initial_files = workspace_material_files()
         plan_prompt = (
             f"Stage: initial_planning\n"
+            f"Project kind: {project_kind}\n"
             f"Product name: {cfg.get('name')}\n"
             f"Goal: {cfg.get('goal')}\n"
             f"User requests so far:\n{user_context}\n\n"
             f"Current workspace snapshot:\n{initial_snapshot}\n\n"
+            f"Delivery bar for this project type:\n{json.dumps(acceptance_profile.get('delivery_bar', []), ensure_ascii=False)}\n\n"
+            f"Stretch bar for this project type:\n{json.dumps(acceptance_profile.get('stretch_bar', []), ensure_ascii=False)}\n\n"
+            f"Verification focus:\n{acceptance_profile.get('verification_focus', '')}\n\n"
             "Return JSON with exactly these fields: decision, summary, phased_plan, acceptance_checks, codex_task, failure_reason.\n"
             "- decision must be one of: delegate, deliver, fail\n"
             "- phased_plan: list of short stage bullets\n"
-            "- acceptance_checks: list of concrete checks\n"
+            "- acceptance_checks: list of concrete checks focused on the delivery bar first\n"
             "- codex_task: the exact next implementation brief for Codex if decision=delegate\n"
+            "- do not treat stretch-bar items as mandatory blockers when delivery-bar evidence can already justify delivery\n"
             "If the workspace is effectively empty, codex_task must force immediate file creation and a minimal runnable scaffold before polish."
         )
         plan, plan_raw = call_claw_json('plan', plan_prompt, timeout_seconds=120)
@@ -1467,10 +1591,14 @@ def run_supervision_loop(product_id: str, run_id: str, stop_event: threading.Eve
             file_delta = build_file_delta(before_files, after_files)
             review_prompt = (
                 f"Stage: review_after_codex_turn\n"
+                f"Project kind: {project_kind}\n"
                 f"Product name: {cfg.get('name')}\n"
                 f"Goal: {cfg.get('goal')}\n"
                 f"Turn: {turn}\n"
-                f"Known acceptance checks: {json.dumps(acceptance_checks, ensure_ascii=False)}\n\n"
+                f"Known acceptance checks: {json.dumps(acceptance_checks, ensure_ascii=False)}\n"
+                f"Delivery bar: {json.dumps(acceptance_profile.get('delivery_bar', []), ensure_ascii=False)}\n"
+                f"Stretch bar: {json.dumps(acceptance_profile.get('stretch_bar', []), ensure_ascii=False)}\n"
+                f"Verification focus: {acceptance_profile.get('verification_focus', '')}\n\n"
                 f"Workspace snapshot before turn:\n{before_snapshot}\n\n"
                 f"Workspace snapshot after turn:\n{after_snapshot}\n\n"
                 f"Material file delta:\n{file_delta}\n\n"
@@ -1483,8 +1611,10 @@ def run_supervision_loop(product_id: str, run_id: str, stop_event: threading.Eve
                 "- decision must be one of: delegate, deliver, fail\n"
                 "- evidence must be a short list of concrete observations from files/logs/output\n"
                 "- next_codex_task must be the next specific implementation brief if decision=delegate\n"
-                "- deliver only if the workspace now has a demonstrable deliverable and the evidence supports it\n"
-                "- fail if progress is blocked or evidence shows the goal cannot be met reasonably"
+                "- first judge whether the current evidence already satisfies the delivery bar for this project type\n"
+                "- do not block delivery only because stretch-bar items are missing if the delivery bar is already met\n"
+                "- for algorithm/research/theoretical work, a meaningful negative result, inconclusive result, benchmark finding, or falsified idea can still be a valid delivery if it is rigorous and useful\n"
+                "- fail only if progress is blocked or evidence shows the current goal cannot be met reasonably"
             )
             review, review_raw = call_claw_json('review', review_prompt, timeout_seconds=120)
             decision = (review.get('decision') or '').strip().lower()
@@ -1524,6 +1654,17 @@ def run_supervision_loop(product_id: str, run_id: str, stop_event: threading.Eve
         append_user_claw_message(product_id, 'claw', f'Run failed with exception: {e}')
         set_state(status='failed', lastError=str(e), stopRequested=False)
     finally:
+        try:
+            st_final = load_product_state(product_id)
+            if st_final.get('status') == 'running':
+                log_claw('Run is exiting while state is still running; applying reconcile fallback.')
+                append_user_claw_message(product_id, 'claw', 'Run exited without a terminal state. Applying reconcile fallback based on the latest evidence.')
+                if workspace_material_files():
+                    set_state(status='failed', lastError='run exited without terminal decision; manual review recommended', stopRequested=False)
+                else:
+                    set_state(status='failed', lastError='run exited without producing deliverable evidence', stopRequested=False)
+        except Exception as reconcile_error:
+            log_claw(f'Reconcile fallback failed: {reconcile_error}')
         clear_active_run(product_id)
 
 def language_switch_html(current_lang: str, base_path: str) -> str:
