@@ -1049,9 +1049,9 @@ def run_self_test(product_id: str) -> None:
             agent_tokens += ['-c', f"model_reasoning_effort=\"{effort}\""]
         agent_cmd = ' '.join(shlex.quote(x) for x in agent_tokens) if agent_tokens else ''
         if agent_cmd:
-            prompt_cmd = [str(ACPX), '--cwd', product_folder, '--approve-all', '--non-interactive-permissions', 'allow', '--agent', agent_cmd, 'exec', 'Reply with exactly SELFTEST_CODEX_OK']
+            prompt_cmd = [str(ACPX), '--cwd', product_folder, '--approve-all', '--non-interactive-permissions', 'deny', '--agent', agent_cmd, 'exec', 'Reply with exactly SELFTEST_CODEX_OK']
         else:
-            prompt_cmd = [str(ACPX), '--cwd', product_folder, '--approve-all', '--non-interactive-permissions', 'allow', 'codex', 'exec', 'Reply with exactly SELFTEST_CODEX_OK']
+            prompt_cmd = [str(ACPX), '--cwd', product_folder, '--approve-all', '--non-interactive-permissions', 'deny', 'codex', 'exec', 'Reply with exactly SELFTEST_CODEX_OK']
 
         rc, out, timed_out = run_selftest_command(prompt_cmd, 60)
         log_codex(f'[taskcaptain] self-test command finished: codex_prompt rc={rc} timedOut={timed_out}')
@@ -1685,7 +1685,7 @@ def run_supervision_loop(product_id: str, run_id: str, stop_event: threading.Eve
         progress_poll_seconds = float(os.environ.get('TASKCAPTAIN_PROGRESS_POLL_SECONDS', '2'))
         cmd_prefix = [str(ACPX), '--cwd', product_folder, '--ttl', '30']
         if codex.get('maxPermission'):
-            cmd_prefix += ['--approve-all', '--non-interactive-permissions', 'allow']
+            cmd_prefix += ['--approve-all', '--non-interactive-permissions', 'deny']
 
         initial_snapshot = workspace_snapshot()
         initial_files = workspace_material_files()
