@@ -1778,7 +1778,7 @@ def run_supervision_loop(product_id: str, run_id: str, stop_event: threading.Eve
                 None,
                 stop_event,
                 product_id,
-                progress_probe=workspace_progress_signature,
+                progress_probe=None,
                 on_stdout_line=lambda line: append_log(codex_log, f'[{now_iso()}] ' + line.rstrip()),
                 on_stderr_line=lambda line: append_log(codex_log, f'[{now_iso()}] [stderr] ' + line.rstrip()),
                 idle_grace_seconds=progress_idle_grace,
