@@ -1,292 +1,236 @@
+</div>
+
+![TaskCaptain hero](./hero2.png)
+
 <div align="center">
+Claw 负责想，Codex 负责写，你负责睡。
+</br>
 
-# TaskCaptain
 
-**Turn goals into running execution until results are delivered.**
+<a href="https://openclaw.ai/" target="_blank"><img src="./openclaw_logo.png" alt="LongWeihan/taskcaptain | OpenClaw" height="60"/></a>
+  
+[![GitHub Stars](https://img.shields.io/github/stars/LongWeihan/taskcaptain?style=flat-square&color=DAA520)](https://github.com/LongWeihan/taskcaptain/stargazers)
+[![GitHub Watchers](https://img.shields.io/github/watchers/LongWeihan/taskcaptain?style=flat-square)](https://github.com/LongWeihan/taskcaptain/watchers)
+[![GitHub Forks](https://img.shields.io/github/forks/LongWeihan/taskcaptain?style=flat-square)](https://github.com/LongWeihan/taskcaptain/network)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/LongWeihan/taskcaptain)
 
-TaskCaptain is a local execution console for Codex-driven work.
-It separates **User ↔ Agent**, **Agent ↔ Codex**, and **execution logs** into distinct surfaces so task progress remains visible, controllable, and inspectable.
+![MIT License](https://img.shields.io/badge/License-MIT-111827?style=flat-square)
+![Python](https://img.shields.io/badge/Python-3.11-3776AB?style=flat-square&logo=python&logoColor=white)
+![macOS Linux](https://img.shields.io/badge/macOS%20%7C%20Linux-Supported-1F2937?style=flat-square)
 
 [中文](./README.md) · [User Guide](./docs/USER_GUIDE.md) · [Deployment](./docs/DEPLOYMENT.md)
 
+
 </div>
 
-![TaskCaptain hero](./hero.png)
+---
+
+## ⚡ Project Overview
+
+**TaskCaptain** is a supervised execution platform powered by OpenClaw. It refactors the subject of "vibe coding": instead of humans manually nudging a chat box, an intelligent agent continuously plans, executes, reviews, and advances tasks within a real workspace. Humans only need to set the goal once. By decoupling user control, Agent supervision, implementation executors, and raw logs into a visible execution chain, TaskCaptain transforms tasks into an autonomous driving experience—**you no longer need to "vibe code"; OpenClaw commands everything autonomously.**
+
+> **You only need to:** Describe what you want to deliver and adjust the direction with natural language at any time.
+> **TaskCaptain returns:** A sustainable, supervised execution chain and a complete record of planning, execution, review, and log evidence.
+
+### Our Vision
+
+TaskCaptain aims to push AI coding from "chat-based generation" to "supervised execution." By explicitly defining the boundaries between humans, Supervisor Agents, and Implementation Executors, we overcome the limitations of traditional coding agents in terms of controllability, visibility, and reliability:
+
+* **For Engineering Practice**: We are a developer's local command center, ensuring long-running tasks, process reviews, failure post-mortems, and mid-task changes happen in a transparent closed loop.
+* **For the Future of Agents**: We represent an early paradigm of Agent Software Engineering, where agents no longer just answer questions but take real responsibility for software production under human command.
 
 ---
 
-## Overview
+## 📸 Screenshots
 
-TaskCaptain is not a generic chat interface.
-
-Its purpose is to **take over task supervision, keep Codex moving, and preserve state, dialogue, and logs inside a local workspace that can actually be inspected.**
-
-For work that needs continuous execution, iterative refinement, and mid-run requirement changes, TaskCaptain provides an execution-oriented control surface rather than a one-shot answer box.
-
----
-
-## Core capabilities
-
-### Continuous execution instead of one-shot replies
-
-TaskCaptain treats work as an ongoing execution flow, not as a single conversational response.
-
-### Clear separation between Agent and Codex
-
-- **Agent**: understands the goal, plans next steps, supervises progress, and folds in new requirements
-- **Codex**: executes implementation work inside the task workspace, produces deliverables, and returns execution output
-
-### Inspectable end to end
-
-The interface preserves three categories of information:
-
-- **User ↔ Agent** control dialogue
-- **Agent ↔ Codex** execution dialogue
-- **raw logs**
-
-That makes it easier to understand why a task continued, why it failed, and where execution became blocked.
-
-### Local-first and disk-backed
-
-Each task keeps isolated:
-
-- config
-- state
-- logs
-- Agent profile
-- Codex session
-
-State is persisted on disk so the system remains inspectable, portable, and recoverable.
+<div align="center">
+<table>
+<tr>
+<td><img width="400" height="400" alt="image" src="https://github.com/user-attachments/assets/bf3c510a-e9b3-42b4-a2b1-5ecfeb93f3eb" />
+</td>
+<td><img width="400" height="400" alt="image" src="https://github.com/user-attachments/assets/b85480c3-e14e-4b7f-8c2c-23a4049d31fa" />
+</td>
+</tr>
+<tr>
+<td><img width="400" height="400" alt="image" src="https://github.com/user-attachments/assets/6487019a-620c-4296-b605-bd92668e6c92" />
+</td>
+<td><img width="400" height="400" alt="image" src="https://github.com/user-attachments/assets/d037ee6e-f620-499e-8257-5944249580cc" />
+</td>
+</tr>
+</table>
+</div>
 
 ---
 
-## Good fit for
+## 🏭 Demo Projects
 
-TaskCaptain is well suited when you need:
+### 1. Local Inventory Procurement Console
 
-- AI to keep moving instead of only answering
-- background execution for development or automation work
-- a full record for debugging, review, or continuation
-- reusable Agent identities across tasks
-- a Codex workspace with clear separation between supervision and execution
+**One prompt:**
+
+```text
+Build a local inventory procurement management console. Make the UI beautiful. Figure out the rest yourself.
+
+```
+
+<div align="center">
+<img src="./交付产品演示.gif" width="800" alt="Project Demo Animation" />
+</div>
+
+### 2. Optimizing Softmax Performance
+
+**One prompt:**
+
+```text
+Research current SOTA Softmax optimization versions, design a version that outperforms them, run it yourself, and provide a comparison. My PC: 7950x + 128GB + 4060ti 16GB.
+
+```
+
+<div align="center">
+
+#### Median Speedup after `N` Aggregation (Candidate vs. Torch)
+
+| Scenario | N=128 | 256 | 512 | 1024 | 2048 | 4096 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `fp16 / none` | 0.38x | 0.55x | 0.27x | 1.41x | **2.87x** | 1.02x |
+| `bf16 / none` | 0.39x | 0.55x | 0.48x | 1.40x | **2.39x** | 1.03x |
+| `fp16 / pad` | 0.78x | 1.13x | 2.00x | 3.07x | **3.72x** | 2.40x |
+| `bf16 / pad` | 0.80x | 1.18x | 2.00x | 3.04x | **3.38x** | 2.44x |
+
+</div>
+
+### 3. A-Share Trading Strategy & Backtesting
+
+**One prompt:**
+
+```text
+Design an expert-level A-share trading strategy and perform backtesting on real historical data. The annualized return should be high and stable enough for me to actually make money.
+
+```
+
+<div align="center">
+
+<img width="500" height="500" alt="equity" src="https://github.com/user-attachments/assets/93bb2318-cd19-4634-87f6-9b315a3e9ebe" />
+
+#### Strategy vs. Benchmark Performance (2017-2024)
+
+| Dimension | Metric | This Strategy (Expert) | CSI 300 Benchmark |
+| --- | --- | --- | --- |
+| **Capital** | Initial Investment | 1,000,000 CNY | 1,000,000 CNY |
+|  | Final Balance | 2,334,288 CNY | 1,177,331 CNY |
+|  | Total Profit | +1,334,288 CNY | +177,331 CNY |
+| **Returns** | Annualized Return | 11.63% | 2.14% |
+| **Risk** | Max Drawdown | -21.08% | -45.60% |
+| **Efficiency** | Sharpe Ratio | 0.79 | 0.11 |
+
+</div>
+
+> **One-click Forum setup with Email Registration**, **llama2.c optimizations**, and more examples are coming soon...
 
 ---
 
-## Product structure
+## Core Capabilities
 
-### Home page
+### Continuous Advancement, Not One-shot Answers
 
-The home page provides:
+TaskCaptain processes tasks as a continuous execution flow rather than ending after one round of suggestions.
 
-- task list
-- Agent Profiles list
-- task creation form
-- reusable Profile creation form
-- bulk deletion for non-running tasks
+### Clear Separation of Duties
 
-### Task detail page
+* **Agent**: Responsible for understanding goals, planning steps, supervising progress, and organizing new requirements.
+* **Codex**: Responsible for implementing within the work directory, generating deliverables, and returning execution results.
 
-Each task page provides:
+### Full Visibility & Easy Troubleshooting
 
-- configuration details
-- User ↔ Agent dialogue
-- Agent ↔ Codex dialogue
-- self-test results
-- Agent log
-- Codex log
+The interface maintains three types of data:
 
-### Reusable Agent Profiles
+* **User ↔ Agent** Control Dialogue
+* **Agent ↔ Codex** Execution Dialogue
+* **Raw Logs**
+This makes it clear why a task continues, fails, or gets stuck.
 
-Profiles store the default identity and behavioral settings of the supervisory Agent, including:
+### Local-First Architecture
 
-- model
-- thinking
-- soul
-- skills
-- description
+Each task has its own:
 
-Tasks can inherit a profile and override selected fields locally.
+* Configuration, State, Logs, Agent Profile, and Codex Session.
+Status is persisted to disk, making it easy to inspect, backup, migrate, or manually fix.
 
 ---
 
-## Main features
+## Quick Start
 
-- local browser UI
-- isolated per-task state and logs
-- reusable Agent Profiles
-- self-test
-- Start / Continue Run
-- Stop Run
-- append new instructions mid-run
-- save current Agent as reusable profile
-- bilingual UI (Chinese / English)
-- no frontend build step
-
----
-
-## Quick start
-
-### 1. Clone the repository
+### 1. Clone the Repo
 
 ```bash
 git clone https://github.com/LongWeihan/taskcaptain.git
 cd taskcaptain
+
 ```
 
-### 2. Start the service
+### 2. Launch
 
 ```bash
 chmod +x run.sh restart.sh
 ./run.sh
+
 ```
 
-Default address:
+Default URL: `http://127.0.0.1:8765`
 
-```text
-http://127.0.0.1:8765
-```
-
-### 3. Optional: load local environment config
+### 3. Optional: Load Local Environment
 
 ```bash
 cp .env.example .env
-set -a
-source .env
-set +a
+# Edit .env as needed
 ./run.sh
+
 ```
-
----
-
-## Requirements
-
-- Linux / WSL2 recommended
-- Python 3.10+
-- `bash`
-- `ss`
-- `acpx` installed, or provided via `ACPX_BIN`
 
 ---
 
 ## Configuration
 
-TaskCaptain supports environment-variable based startup configuration.
+TaskCaptain uses environment variables for configuration:
 
-### Common environment variables
-
-```bash
-export PRODUCTS_UI_HOST=127.0.0.1
-export PRODUCTS_UI_PORT=8765
-export PRODUCTS_UI_DEFAULT_LANG=en
-export PRODUCTS_UI_DEFAULT_OPENAI_BASE_URL=http://127.0.0.1:8317/v1
-export PRODUCTS_UI_DEFAULT_PRODUCT_FOLDER="$PWD/workspace"
-export PRODUCTS_UI_PROXY=
-export PRODUCTS_UI_NO_PROXY=127.0.0.1,localhost,::1
-export ACPX_BIN=/absolute/path/to/acpx
-```
-
-### Example
-
-```bash
-export PRODUCTS_UI_PORT=8877
-export PRODUCTS_UI_DEFAULT_OPENAI_BASE_URL=http://127.0.0.1:8317/v1
-./run.sh
-```
-
-For deployment notes, see [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md).
+* `PRODUCTS_UI_PORT`: Default `8765`
+* `PRODUCTS_UI_DEFAULT_OPENAI_BASE_URL`: API endpoint
+* `ACPX_BIN`: Path to the `acpx` binary
 
 ---
 
-## Runtime behavior
-
-### `run.sh`
-
-- starts TaskCaptain in the background when the port is free
-- exits cleanly with the current address and log path when the service is already running
-
-### `restart.sh`
-
-- stops the current TaskCaptain process on the configured port
-- waits for port release
-- force-kills lingering processes when needed
-- clears the server log and starts again
-
----
-
-## Repository layout
+## Directory Structure
 
 ```text
 taskcaptain/
-├── app/
-│   └── server.py
-├── data/
-│   ├── claw-profiles/
-│   ├── products/
-│   └── trash/
-├── docs/
-│   ├── ARCHITECTURE.md
-│   ├── DATA_MODEL.md
-│   ├── DEPLOYMENT.md
-│   └── USER_GUIDE.md
-├── logs/
-├── runs/
-├── workspace/
-├── .env.example
-├── .gitignore
-├── CONTRIBUTING.md
-├── LICENSE
-├── Makefile
-├── README.md
-├── README-EN.md
-├── SECURITY.md
-├── hero.png
-├── restart.sh
-└── run.sh
+├── app/             # Server logic
+├── data/            # Profiles, products, and state
+├── docs/            # Detailed documentation
+├── logs/            # Runtime logs
+├── runs/            # Active execution sessions
+├── workspace/       # Default task output directory
+├── run.sh           # Start script
+└── restart.sh       # Restart script
+
 ```
-
----
-
-## Documentation
-
-- [Chinese README](./README.md)
-- [User Guide](./docs/USER_GUIDE.md)
-- [Deployment](./docs/DEPLOYMENT.md)
-- [Architecture](./docs/ARCHITECTURE.md)
-- [Data Model](./docs/DATA_MODEL.md)
-- [Contributing](./CONTRIBUTING.md)
-- [Security Policy](./SECURITY.md)
-
----
-
-## Security notes
-
-TaskCaptain is currently intended for **trusted local environments**.
-
-The repository does not currently provide:
-
-- multi-user authentication
-- permission separation
-- public-facing access control
-
-If you need remote access, deploy it behind a reverse proxy and add at minimum:
-
-- authentication
-- HTTPS
-- IP restrictions
-- least-privilege runtime practices
-
-See [SECURITY.md](./SECURITY.md) for guidance.
-
----
-
-## Open source and project policy
-
-- License: [MIT](./LICENSE)
-- Contributing: [CONTRIBUTING.md](./CONTRIBUTING.md)
-- Security: [SECURITY.md](./SECURITY.md)
 
 ---
 
 ## License
 
-This project is released under the [MIT License](./LICENSE).
+Distributed under the [MIT License](https://www.google.com/search?q=./LICENSE).
+
+## 📄 Acknowledgments
+
+**TaskCaptain is strategically supported and incubated by the Ramen Group!** We sincerely thank Ramen for their technical support!
+
+## 📈 Stats
+
+
+<a href="https://star-history.com/#LongWeihan/taskcaptain&type=date">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=LongWeihan/taskcaptain&type=date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=LongWeihan/taskcaptain&type=date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=LongWeihan/taskcaptain&type=date" />
+ </picture>
+</a>
