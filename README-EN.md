@@ -232,11 +232,5 @@ Distributed under the [MIT License](https://www.google.com/search?q=./LICENSE).
 
 ## 📈 Stats
 
-
-<a href="https://star-history.com/#LongWeihan/taskcaptain&type=date">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=LongWeihan/taskcaptain&type=date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=LongWeihan/taskcaptain&type=date" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=LongWeihan/taskcaptain&type=date" />
- </picture>
-</a>
+![Star History Dark](https://api.star-history.com/svg?repos=LongWeihan/taskcaptain&type=date&theme=dark#gh-dark-mode-only)
+![Star History Light](https://api.star-history.com/svg?repos=LongWeihan/taskcaptain&type=date#gh-light-mode-only)
