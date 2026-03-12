@@ -232,5 +232,4 @@ Distributed under the [MIT License](https://www.google.com/search?q=./LICENSE).
 
 ## 📈 Stats
 
-![Star History Dark](https://api.star-history.com/svg?repos=LongWeihan/taskcaptain&type=date&theme=dark#gh-dark-mode-only)
 ![Star History Light](https://api.star-history.com/svg?repos=LongWeihan/taskcaptain&type=date#gh-light-mode-only)
