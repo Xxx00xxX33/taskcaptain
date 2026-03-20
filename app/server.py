@@ -12,6 +12,7 @@ try:
         DEFAULT_LANG,
         HOST,
         PORT,
+        DEFAULT_NO_PROXY,
         append_log,
         create_product,
         effective_claw_config,
@@ -23,6 +24,7 @@ try:
         save_claw_profile_from_form,
         save_product_config,
     )
+    from tc_live import build_product_live_payload
     from tc_pages import render_index_page, render_product_page
     from tc_runtime import (
         append_user_claw_message,
@@ -32,12 +34,12 @@ try:
         start_self_test,
         stop_run,
     )
-    from tc_ui import build_product_live_payload
 except ModuleNotFoundError:  # pragma: no cover
     from app.tc_core import (
         DEFAULT_LANG,
         HOST,
         PORT,
+        DEFAULT_NO_PROXY,
         append_log,
         create_product,
         effective_claw_config,
@@ -49,6 +51,7 @@ except ModuleNotFoundError:  # pragma: no cover
         save_claw_profile_from_form,
         save_product_config,
     )
+    from app.tc_live import build_product_live_payload
     from app.tc_pages import render_index_page, render_product_page
     from app.tc_runtime import (
         append_user_claw_message,
@@ -58,7 +61,6 @@ except ModuleNotFoundError:  # pragma: no cover
         start_self_test,
         stop_run,
     )
-    from app.tc_ui import build_product_live_payload
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -145,6 +147,54 @@ class Handler(BaseHTTPRequestHandler):
             cfg['maxTurns'] = v
             save_product_config(pid, cfg)
             append_log(product_dir(pid) / 'logs' / 'claw.log', f'[{now_iso()}] Updated maxTurns to {v} via UI.')
+            self.redirect(f'/product/{pid}?lang={lang}')
+            return
+
+        if parsed.path.startswith('/save-runtime-settings/'):
+            pid = parsed.path.split('/')[-1]
+            cfg = load_product_config(pid)
+            try:
+                max_turns = int((form.get('maxTurns') or '').strip() or str(cfg.get('maxTurns') or 8))
+            except Exception:
+                max_turns = int(cfg.get('maxTurns') or 8)
+            if max_turns < 1:
+                max_turns = 1
+            if max_turns > 99:
+                max_turns = 99
+            claw_thinking = (form.get('clawThinking') or '').strip().lower()
+            codex_thinking = (form.get('codexThinking') or '').strip().lower()
+            if claw_thinking and claw_thinking not in {'low', 'medium', 'high', 'xhigh'}:
+                claw_thinking = ''
+            if codex_thinking not in {'low', 'medium', 'high', 'xhigh'}:
+                codex_thinking = cfg.get('codex', {}).get('thinking', 'medium')
+            cfg['maxTurns'] = max_turns
+            cfg.setdefault('claw', {})['thinking'] = claw_thinking
+            cfg.setdefault('codex', {})['thinking'] = codex_thinking
+            save_product_config(pid, cfg)
+            append_log(
+                product_dir(pid) / 'logs' / 'claw.log',
+                f'[{now_iso()}] Updated runtime settings via UI: maxTurns={max_turns}, clawThinking={claw_thinking or "(inherit)"}, codexThinking={codex_thinking}.',
+            )
+            self.redirect(f'/product/{pid}?lang={lang}')
+            return
+
+        if parsed.path.startswith('/save-connection-settings/'):
+            pid = parsed.path.split('/')[-1]
+            cfg = load_product_config(pid)
+            claw = cfg.setdefault('claw', {})
+            codex = cfg.setdefault('codex', {})
+            network = cfg.setdefault('network', {})
+            claw['endpoint'] = (form.get('clawEndpoint') or '').strip() or claw.get('endpoint', '')
+            claw['apiKey'] = (form.get('clawApiKey') or '').strip()
+            codex['endpoint'] = (form.get('codexEndpoint') or '').strip() or codex.get('endpoint', '')
+            codex['apiKey'] = (form.get('codexApiKey') or '').strip()
+            network['proxy'] = (form.get('proxy') or '').strip()
+            network['noProxy'] = (form.get('noProxy') or '').strip() or network.get('noProxy') or DEFAULT_NO_PROXY
+            save_product_config(pid, cfg)
+            append_log(
+                product_dir(pid) / 'logs' / 'claw.log',
+                f'[{now_iso()}] Updated connection settings via UI: agentEndpoint={claw.get("endpoint","")}, codexEndpoint={codex.get("endpoint","")}, proxy={network.get("proxy","") or "(direct)"}, noProxy={network.get("noProxy","")}.',
+            )
             self.redirect(f'/product/{pid}?lang={lang}')
             return
 

@@ -2,34 +2,6 @@
 from __future__ import annotations
 
 import html
-import json
-
-try:
-    from tc_core import (
-        DEFAULT_LANG,
-        I18N,
-        effective_claw_config,
-        load_product_config,
-        load_product_state,
-        mask_present,
-        now_iso,
-        product_dir,
-        t,
-    )
-    from tc_runtime import active_run_info
-except ModuleNotFoundError:
-    from app.tc_core import (
-        DEFAULT_LANG,
-        I18N,
-        effective_claw_config,
-        load_product_config,
-        load_product_state,
-        mask_present,
-        now_iso,
-        product_dir,
-        t,
-    )
-    from app.tc_runtime import active_run_info
 
 def language_switch_html(current_lang: str, base_path: str) -> str:
     return f"""
@@ -145,45 +117,46 @@ def page_template(title: str, body: str, lang: str, path: str = '/') -> bytes:
     function toggleAllCheckboxes(source) {{
       document.querySelectorAll('.item-checkbox:not([disabled])').forEach(cb => cb.checked = source.checked);
     }}
+    function initTabs(root) {{
+      (root || document).querySelectorAll('[data-tab-group]').forEach(group => {{
+        if (group.dataset.tabsBound === '1') return;
+        group.dataset.tabsBound = '1';
+        const groupName = group.getAttribute('data-tab-group');
+        const storageKey = 'taskcaptain-tab-' + groupName;
+        const buttons = Array.from(group.querySelectorAll('[data-tab-target]'));
+        const panels = Array.from(document.querySelectorAll(`[data-tab-panel="${{groupName}}"]`));
+        function activate(targetId, persist = true) {{
+          buttons.forEach(btn => {{
+            const active = btn.getAttribute('data-tab-target') === targetId;
+            btn.classList.toggle('bg-white', active);
+            btn.classList.toggle('dark:bg-zinc-700', active);
+            btn.classList.toggle('shadow-sm', active);
+            btn.classList.toggle('text-slate-500', !active);
+            btn.classList.toggle('dark:text-zinc-400', !active);
+          }});
+          panels.forEach(panel => {{
+            panel.classList.toggle('hidden', panel.id !== targetId);
+          }});
+          if (persist) {{
+            localStorage.setItem(storageKey, targetId);
+          }}
+        }}
+        buttons.forEach(btn => btn.addEventListener('click', () => activate(btn.getAttribute('data-tab-target'))));
+        const saved = localStorage.getItem(storageKey);
+        const savedBtn = buttons.find(btn => btn.getAttribute('data-tab-target') === saved && !btn.disabled);
+        const first = buttons.find(btn => !btn.disabled);
+        if (savedBtn) {{
+          activate(savedBtn.getAttribute('data-tab-target'), false);
+        }} else if (first) {{
+          activate(first.getAttribute('data-tab-target'), false);
+        }}
+      }});
+    }}
+    document.addEventListener('DOMContentLoaded', () => initTabs(document));
   </script>
 </body>
 </html>
 """.encode('utf-8')
-
-
-def render_dialogue(items: list[dict], empty_text: str) -> str:
-    if not items:
-        return f"<div class='flex-1 flex items-center justify-center p-8'><div class=\"text-center p-6 border border-dashed border-slate-300 dark:border-zinc-700 rounded-xl text-slate-500 dark:text-zinc-400 text-sm\">{html.escape(empty_text)}</div></div>"
-    rows = []
-    for x in items:
-        role = x.get('role', '')
-        is_user = role == 'user'
-        if is_user:
-            bubble_class = 'chat-bubble-user w-[85%] ml-auto bg-brand-50 border border-brand-100 dark:bg-brand-900/20 dark:border-brand-800/50 p-3.5 rounded-2xl shadow-sm'
-            role_class = 'text-brand-600 dark:text-brand-400'
-            role_display = 'USER'
-        else:
-            bubble_class = 'chat-bubble-bot w-[85%] bg-white dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 p-3.5 rounded-2xl shadow-sm'
-            role_class = 'text-emerald-600 dark:text-emerald-400' if role == 'claw' else 'text-slate-500 dark:text-zinc-400'
-            role_display = 'AGENT' if role == 'claw' else role.upper()
-            if role == 'codex':
-                bubble_class = 'chat-bubble-user w-[90%] ml-auto bg-slate-100 border border-slate-200 dark:bg-zinc-800 dark:border-zinc-700 p-3.5 rounded-2xl shadow-sm text-slate-700 dark:text-slate-300'
-
-        header_content = ""
-        if role == 'claw':
-            header_content = f"<span class='text-xs font-bold {role_class} tracking-wider'>{html.escape(role_display)}</span><span class='text-[10px] font-mono text-slate-400'>{html.escape(x.get('ts', ''))}</span>"
-        else:
-            header_content = f"<span class='text-[10px] font-mono text-slate-400'>{html.escape(x.get('ts', ''))}</span><span class='text-xs font-bold {role_class} tracking-wider'>{html.escape(role_display)}</span>"
-
-        rows.append(f"""
-        <div class='{bubble_class} mb-4'>
-          <div class='flex justify-between items-end mb-2'>
-            {header_content}
-          </div>
-          <div class='text-sm font-mono leading-relaxed break-words whitespace-pre-wrap'>{html.escape(x.get('text', ''))}</div>
-        </div>
-        """)
-    return ''.join(rows)
 
 
 def badge_class_for(status: str) -> str:
@@ -196,42 +169,5 @@ def badge_class_for(status: str) -> str:
     if status == 'stopped':
         return 'badge-stopped'
     return 'badge-idle'
-
-
-def render_checks_html(checks: dict, lang: str) -> str:
-    return ''.join(
-        f"<tr class='border-b border-slate-100 dark:border-zinc-800 last:border-0'><td class='py-3 pr-4 font-semibold text-sm'>{html.escape(k)}</td><td class='py-3 px-4'><span class='inline-flex items-center px-2 py-0.5 rounded text-xs font-bold {'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400' if v.get('ok') else 'bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400'}'>{'Pass' if v.get('ok') else 'Fail'}</span></td><td class='py-3 pl-4 font-mono text-xs text-slate-500 break-all'>{html.escape(str(v.get('detail', '')))}</td></tr>"
-        for k, v in checks.items()
-    ) or f"<tr><td colspan='3' class='py-4 text-slate-500 text-center text-sm'>{html.escape(t(lang, 'not_run'))}</td></tr>"
-
-
-def build_product_live_payload(pid: str, lang: str) -> dict:
-    d = product_dir(pid)
-    cfg = load_product_config(pid)
-    st = load_product_state(pid)
-    self_test = st.get('selfTest', {})
-    checks = self_test.get('checks', {})
-    user_claw = st.get('conversations', {}).get('userClaw', [])[-30:]
-    claw_codex = st.get('conversations', {}).get('clawCodex', [])[-30:]
-    status = st.get('status', 'idle')
-    st_status = self_test.get('status', 'not-run')
-    is_running = status == 'running' and bool(active_run_info(pid))
-    return {
-        'status': status,
-        'statusLabel': t(lang, status) if status in I18N[lang] else status,
-        'statusClass': badge_class_for(status),
-        'currentTurn': int(st.get('currentTurn') or 0),
-        'maxTurns': int(cfg.get('maxTurns') or 8),
-        'selfTestStatus': st_status,
-        'selfTestStatusLabel': t(lang, st_status) if st_status in I18N[lang] else st_status,
-        'selfTestStatusClass': badge_class_for(st_status),
-        'selfTestRunning': st_status == 'running',
-        'isRunning': is_running,
-        'userClawHtml': render_dialogue(user_claw, t(lang, 'no_user_claw')),
-        'clawCodexHtml': render_dialogue(claw_codex, t(lang, 'no_claw_codex')),
-        'checksHtml': render_checks_html(checks, lang),
-        'clawLog': (d / 'logs' / 'claw.log').read_text(encoding='utf-8') if (d / 'logs' / 'claw.log').exists() else t(lang, 'no_logs'),
-        'codexLog': (d / 'logs' / 'codex.log').read_text(encoding='utf-8') if (d / 'logs' / 'codex.log').exists() else t(lang, 'no_logs'),
-    }
 
 

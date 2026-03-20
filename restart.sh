@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")"
+
 PORT="${PRODUCTS_UI_PORT:-8765}"
 LOG_DIR="$PWD/logs"
 LOG_FILE="${LOG_DIR}/server.log"

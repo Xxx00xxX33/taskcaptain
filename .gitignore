@@ -20,6 +20,9 @@ __pycache__/
 *.pyc
 *.pyo
 
+# Optional Rust helper build output
+rust/*/target/
+
 # Editors / OS
 .DS_Store
 .vscode/

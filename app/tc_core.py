@@ -18,7 +18,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, quote, urlparse
-from urllib.request import Request, urlopen
+from urllib.request import ProxyHandler, Request, build_opener, urlopen
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / 'data'
@@ -26,17 +26,48 @@ PRODUCTS = DATA / 'products'
 TRASH = DATA / 'trash'
 CLAW_PROFILES = DATA / 'claw-profiles'
 RUNS = ROOT / 'runs'
+
+
+def load_dotenv_defaults() -> None:
+    env_path = ROOT / '.env'
+    if not env_path.exists():
+        return
+    for raw_line in env_path.read_text(encoding='utf-8').splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith('#') or '=' not in line:
+            continue
+        key, value = line.split('=', 1)
+        key = key.strip()
+        value = value.strip()
+        if not key:
+            continue
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+            value = value[1:-1]
+        os.environ.setdefault(key, value)
+
+
+load_dotenv_defaults()
+
 DEFAULT_ACPX = '/home/a/.openclaw/extensions/acpx/node_modules/.bin/acpx'
 ACPX = Path(os.environ.get('ACPX_BIN', DEFAULT_ACPX))
 
-CODEX_ACP_BIN = os.environ.get('CODEX_ACP_BIN', '/home/a/.npm/_npx/e3854e347c184741/node_modules/.bin/codex-acp').strip()
+DEFAULT_CODEX_ACP_JS = '/home/a/.npm/_npx/e3854e347c184741/node_modules/.bin/codex-acp'
+DEFAULT_CODEX_ACP_NATIVE = '/home/a/.npm/_npx/e3854e347c184741/node_modules/@zed-industries/codex-acp-linux-x64/bin/codex-acp'
+CODEX_ACP_BIN = os.environ.get(
+    'CODEX_ACP_BIN',
+    DEFAULT_CODEX_ACP_NATIVE if Path(DEFAULT_CODEX_ACP_NATIVE).exists() else DEFAULT_CODEX_ACP_JS,
+).strip()
 
 HOST = os.environ.get('PRODUCTS_UI_HOST', '127.0.0.1')
 PORT = int(os.environ.get('PRODUCTS_UI_PORT', '8765'))
 DEFAULT_LANG = os.environ.get('PRODUCTS_UI_DEFAULT_LANG', 'en')
-DEFAULT_AGENT_ENDPOINT = os.environ.get('PRODUCTS_UI_DEFAULT_OPENAI_BASE_URL', 'http://localhost:8317/v1')
-DEFAULT_CODEX_ENDPOINT = os.environ.get('PRODUCTS_UI_DEFAULT_CODEX_BASE_URL', 'https://www.right.codes/codex/v1')
-DEFAULT_CODEX_API_KEY = os.environ.get('PRODUCTS_UI_DEFAULT_CODEX_API_KEY', '')
+DEFAULT_AGENT_ENDPOINT = os.environ.get('PRODUCTS_UI_DEFAULT_OPENAI_BASE_URL', 'https://api.loveatri.su/v1')
+DEFAULT_AGENT_API_KEY = os.environ.get(
+    'PRODUCTS_UI_DEFAULT_OPENAI_API_KEY',
+    'sk-pvVnxLEwR1SKD5Q9U5pwf7z2reGTieDj98aP5izGv3NTYywY',
+)
+DEFAULT_CODEX_ENDPOINT = os.environ.get('PRODUCTS_UI_DEFAULT_CODEX_BASE_URL', DEFAULT_AGENT_ENDPOINT)
+DEFAULT_CODEX_API_KEY = os.environ.get('PRODUCTS_UI_DEFAULT_CODEX_API_KEY', DEFAULT_AGENT_API_KEY)
 DEFAULT_PRODUCT_FOLDER = os.environ.get('PRODUCTS_UI_DEFAULT_PRODUCT_FOLDER', str(ROOT / 'workspace'))
 DEFAULT_PROXY = os.environ.get('PRODUCTS_UI_PROXY', '').strip()
 DEFAULT_NO_PROXY = os.environ.get('PRODUCTS_UI_NO_PROXY', '127.0.0.1,localhost,::1').strip()
@@ -73,6 +104,21 @@ I18N = {
         'claw_profile_select': '选择可复用的 Agent Profile',
         'claw_soul': 'Agent Soul（留空则继承 profile）',
         'claw_skills': 'Agent Skills（留空则继承 profile）',
+        'network_setting': '网络与代理',
+        'connection_setting': '连接设置',
+        'runtime_setting': '运行设置',
+        'proxy_url': '代理地址',
+        'proxy_help': '例如 http://127.0.0.1:7897；留空表示直连。',
+        'no_proxy': '直连白名单',
+        'save_connection_button': '保存连接设置',
+        'save_runtime_button': '保存运行设置',
+        'tasks_tab': '任务',
+        'profiles_tab': 'Profiles',
+        'task_form_tab': '新任务',
+        'profile_form_tab': '新 Profile',
+        'dialogue_tab': '对话',
+        'logs_tab': '日志',
+        'overview_tab': '概览',
         'codex_endpoint': 'Codex 端点',
         'codex_api_key': 'Codex API Key',
         'codex_model': 'Codex 模型',
@@ -115,6 +161,19 @@ I18N = {
         'claw_log': 'Agent Log',
         'codex_log': 'Codex Log',
         'no_logs': '还没有日志。',
+        'quick_signals': '运行信号',
+        'recent_artifacts': '最近产物',
+        'no_artifacts': '暂无产物。',
+        'artifact_count': '产物数',
+        'updated_at': '更新于',
+        'live_sync': '最近同步',
+        'log_mode': '日志读取',
+        'recent_tail': '最近尾部',
+        'rust_fast_path': 'Rust 快速路径',
+        'python_fallback': 'Python 回退',
+        'tailing_recent_logs': '仅展示最近 {size} 的日志尾部',
+        'log_tail_status': '显示最近 {shown} / 总 {total}',
+        'copy_path': '复制路径',
         'untitled': '未命名任务',
         'self_test_details': '自检详情',
         'not_run': '未运行',
@@ -173,6 +232,21 @@ I18N = {
         'claw_profile_select': 'Choose reusable Agent profile',
         'claw_soul': 'Agent Soul (blank = inherit)',
         'claw_skills': 'Agent Skills (blank = inherit)',
+        'network_setting': 'Network & Proxy',
+        'connection_setting': 'Connection Settings',
+        'runtime_setting': 'Runtime Settings',
+        'proxy_url': 'Proxy URL',
+        'proxy_help': 'For example http://127.0.0.1:7897. Leave blank for direct connection.',
+        'no_proxy': 'No Proxy',
+        'save_connection_button': 'Save Connection Settings',
+        'save_runtime_button': 'Save Runtime Settings',
+        'tasks_tab': 'Tasks',
+        'profiles_tab': 'Profiles',
+        'task_form_tab': 'New Task',
+        'profile_form_tab': 'New Profile',
+        'dialogue_tab': 'Dialogue',
+        'logs_tab': 'Logs',
+        'overview_tab': 'Overview',
         'codex_endpoint': 'Codex Endpoint',
         'codex_api_key': 'Codex API Key',
         'codex_model': 'Codex Model',
@@ -215,6 +289,19 @@ I18N = {
         'claw_log': 'Agent Log',
         'codex_log': 'Codex Log',
         'no_logs': 'No logs yet.',
+        'quick_signals': 'Quick Signals',
+        'recent_artifacts': 'Recent Artifacts',
+        'no_artifacts': 'No artifacts yet.',
+        'artifact_count': 'Artifacts',
+        'updated_at': 'Updated',
+        'live_sync': 'Last Sync',
+        'log_mode': 'Log Reading',
+        'recent_tail': 'Recent Tail',
+        'rust_fast_path': 'Rust fast path',
+        'python_fallback': 'Python fallback',
+        'tailing_recent_logs': 'Showing the most recent {size} of each log',
+        'log_tail_status': 'Showing recent {shown} / total {total}',
+        'copy_path': 'Copy Path',
         'untitled': 'Untitled Task',
         'self_test_details': 'Self-test Details',
         'not_run': 'not-run',
@@ -304,12 +391,32 @@ def normalize_product_identity(raw_name: str, raw_folder: str) -> tuple[str, str
         name = 'Untitled Product'
     if not folder:
         folder = default_folder
+    folder = str(resolve_workspace_path(folder))
 
     return name, folder, inferred_from_name_path
 
 
 def product_dir(product_id: str) -> Path:
     return PRODUCTS / product_id
+
+
+def resolve_workspace_path(raw_path: str | None) -> Path:
+    text = (raw_path or '').strip()
+    if not text:
+        return Path(DEFAULT_PRODUCT_FOLDER).expanduser()
+    p = Path(text).expanduser()
+    if p.is_absolute():
+        return p
+    return (ROOT / p).resolve()
+
+
+def ensure_workspace_path(raw_path: str | None) -> tuple[bool, str]:
+    try:
+        path = resolve_workspace_path(raw_path)
+        path.mkdir(parents=True, exist_ok=True)
+        return True, str(path)
+    except Exception as e:
+        return False, str(e)
 
 
 def profile_path(profile_id: str) -> Path:
@@ -433,11 +540,16 @@ def normalize_config(cfg: dict) -> tuple[dict, bool]:
             cfg['maxTurns'] = 1
         if cfg['maxTurns'] > 99:
             cfg['maxTurns'] = 99
+    normalized_folder = str(resolve_workspace_path(cfg.get('productFolder')))
+    if cfg.get('productFolder') != normalized_folder:
+        cfg['productFolder'] = normalized_folder
+        changed = True
     claw = cfg.setdefault('claw', {})
     codex = cfg.setdefault('codex', {})
+    network = cfg.setdefault('network', {})
     defaults = {
         'endpoint': DEFAULT_AGENT_ENDPOINT,
-        'apiKey': '',
+        'apiKey': DEFAULT_AGENT_API_KEY,
         'profileId': DEFAULT_PROFILE_ID,
         'model': '',
         'thinking': '',
@@ -460,6 +572,14 @@ def normalize_config(cfg: dict) -> tuple[dict, bool]:
     for k, v in codex_defaults.items():
         if k not in codex:
             codex[k] = v
+            changed = True
+    network_defaults = {
+        'proxy': DEFAULT_PROXY,
+        'noProxy': DEFAULT_NO_PROXY,
+    }
+    for k, v in network_defaults.items():
+        if k not in network:
+            network[k] = v
             changed = True
     if 'createdAt' not in cfg:
         cfg['createdAt'] = now_iso()
@@ -553,6 +673,16 @@ def effective_claw_config(cfg: dict) -> dict:
     }
 
 
+def effective_network_config(cfg: dict | None = None) -> dict:
+    network = (cfg or {}).get('network', {}) if isinstance(cfg, dict) else {}
+    proxy = (network.get('proxy') or '').strip()
+    no_proxy = (network.get('noProxy') or DEFAULT_NO_PROXY or '').strip()
+    return {
+        'proxy': proxy,
+        'noProxy': no_proxy,
+    }
+
+
 def list_products():
     items = []
     for d in sorted(PRODUCTS.iterdir() if PRODUCTS.exists() else []):
@@ -568,6 +698,42 @@ def mask_present(value: str | None) -> str:
     return 'yes' if value else 'no'
 
 
+def proxy_bypass_match(hostname: str | None, no_proxy: str | None) -> bool:
+    host = (hostname or '').strip().lower()
+    entries = [(x or '').strip().lower() for x in (no_proxy or '').split(',')]
+    entries = [x for x in entries if x]
+    if not host:
+        return False
+    for entry in entries:
+        token = entry
+        if token == '*':
+            return True
+        if token.startswith('[') and token.endswith(']'):
+            token = token[1:-1]
+        if ':' in token and token.count(':') == 1:
+            token = token.split(':', 1)[0]
+        token = token.lstrip('.')
+        if not token:
+            continue
+        if host == token:
+            return True
+        if host.endswith('.' + token):
+            return True
+    return False
+
+
+def open_url(req_or_url, timeout: int = 10, proxy: str | None = None, no_proxy: str | None = None):
+    target = req_or_url.full_url if isinstance(req_or_url, Request) else str(req_or_url)
+    parsed = urlparse(target)
+    handlers = []
+    if proxy and not proxy_bypass_match(parsed.hostname, no_proxy):
+        handlers.append(ProxyHandler({'http': proxy, 'https': proxy}))
+    else:
+        handlers.append(ProxyHandler({}))
+    opener = build_opener(*handlers)
+    return opener.open(req_or_url, timeout=timeout)
+
+
 def build_models_url(base: str) -> str:
     base = (base or '').rstrip('/')
     if not base:
@@ -577,7 +743,12 @@ def build_models_url(base: str) -> str:
     return f'{base}/models'
 
 
-def probe_openai_like_endpoint(base_url: str, api_key: str | None = None) -> dict:
+def probe_openai_like_endpoint(
+    base_url: str,
+    api_key: str | None = None,
+    proxy: str | None = None,
+    no_proxy: str | None = None,
+) -> dict:
     models_url = build_models_url(base_url)
     if not models_url:
         return {'ok': False, 'detail': 'missing base url'}
@@ -586,7 +757,7 @@ def probe_openai_like_endpoint(base_url: str, api_key: str | None = None) -> dic
         headers['Authorization'] = f'Bearer {api_key}'
     req = Request(models_url, headers=headers, method='GET')
     try:
-        with urlopen(req, timeout=10) as resp:
+        with open_url(req, timeout=10, proxy=proxy, no_proxy=no_proxy) as resp:
             body = resp.read(1200).decode('utf-8', 'ignore')
             ok = 200 <= resp.status < 300
             return {'ok': ok, 'detail': f'HTTP {resp.status}: {body[:400]}'}
@@ -629,8 +800,8 @@ def create_product(form: dict[str, str]) -> str:
         'productFolder': product_folder,
         'maxTurns': max_turns,
         'claw': {
-            'endpoint': form.get('clawEndpoint', '').strip(),
-            'apiKey': form.get('clawApiKey', '').strip(),
+            'endpoint': form.get('clawEndpoint', '').strip() or DEFAULT_AGENT_ENDPOINT,
+            'apiKey': form.get('clawApiKey', '').strip() or DEFAULT_AGENT_API_KEY,
             'profileId': profile.get('id'),
             'model': form.get('clawModel', '').strip(),
             'thinking': form.get('clawThinking', '').strip(),
@@ -645,6 +816,10 @@ def create_product(form: dict[str, str]) -> str:
             'planMode': form.get('codexPlanMode', '') == 'on',
             'maxPermission': form.get('codexMaxPermission', '') == 'on',
             'sessionName': f'oc-product-{product_id}',
+        },
+        'network': {
+            'proxy': form.get('proxy', '').strip(),
+            'noProxy': form.get('noProxy', '').strip() or DEFAULT_NO_PROXY,
         },
         'createdAt': now_iso(),
     }
@@ -674,8 +849,13 @@ def create_product(form: dict[str, str]) -> str:
     })
     save_product_config(product_id, cfg)
     save_product_state(product_id, st)
+    workspace_ok, workspace_detail = ensure_workspace_path(product_folder)
     append_log(d / 'logs' / 'claw.log', f'[{now_iso()}] Product created.')
     append_log(d / 'logs' / 'codex.log', f'[{now_iso()}] Product created.')
+    append_log(
+        d / 'logs' / 'claw.log',
+        f'[{now_iso()}] Workspace {"ready" if workspace_ok else "create-failed"}: {workspace_detail}',
+    )
     if inferred_from_name_path:
         append_log(d / 'logs' / 'claw.log', f'[{now_iso()}] Interpreted product name as a filesystem path and normalized to name={name!r}, productFolder={product_folder!r}.')
     return product_id

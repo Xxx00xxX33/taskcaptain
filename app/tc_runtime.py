@@ -3,15 +3,14 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import shlex
 import signal
 import subprocess
+import shutil
 import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from urllib.request import Request, urlopen
 
 try:
     from tc_core import (
@@ -19,12 +18,13 @@ try:
         ACTIVE_RUNS,
         ACTIVE_SELF_TESTS,
         CODEX_ACP_BIN,
-        DEFAULT_NO_PROXY,
-        DEFAULT_PROXY,
+        DEFAULT_PROFILE_ID,
         RUN_LOCK,
         SELF_TEST_LOCK,
         append_log,
         effective_claw_config,
+        effective_network_config,
+        ensure_workspace_path,
         load_claw_profile,
         load_product_config,
         load_product_state,
@@ -32,10 +32,23 @@ try:
         probe_openai_like_endpoint,
         product_dir,
         profile_path,
+        resolve_workspace_path,
         save_product_config,
         save_product_state,
         slugify,
+        TRASH,
         write_json,
+    )
+    from tc_runtime_shared import (
+        extract_codex_dialogue_text,
+        extract_json_object,
+        infer_project_kind,
+        normalize_effort,
+        openai_chat_completion,
+        openai_responses,
+        project_acceptance_profile,
+        stringify_for_log,
+        summarize_user_claw_messages,
     )
 except ModuleNotFoundError:
     from app.tc_core import (
@@ -43,12 +56,13 @@ except ModuleNotFoundError:
         ACTIVE_RUNS,
         ACTIVE_SELF_TESTS,
         CODEX_ACP_BIN,
-        DEFAULT_NO_PROXY,
-        DEFAULT_PROXY,
+        DEFAULT_PROFILE_ID,
         RUN_LOCK,
         SELF_TEST_LOCK,
         append_log,
         effective_claw_config,
+        effective_network_config,
+        ensure_workspace_path,
         load_claw_profile,
         load_product_config,
         load_product_state,
@@ -56,10 +70,23 @@ except ModuleNotFoundError:
         probe_openai_like_endpoint,
         product_dir,
         profile_path,
+        resolve_workspace_path,
         save_product_config,
         save_product_state,
         slugify,
+        TRASH,
         write_json,
+    )
+    from app.tc_runtime_shared import (
+        extract_codex_dialogue_text,
+        extract_json_object,
+        infer_project_kind,
+        normalize_effort,
+        openai_chat_completion,
+        openai_responses,
+        project_acceptance_profile,
+        stringify_for_log,
+        summarize_user_claw_messages,
     )
 
 def build_codex_env(cfg: dict) -> dict:
@@ -69,13 +96,8 @@ def build_codex_env(cfg: dict) -> dict:
         env['OPENAI_BASE_URL'] = codex['endpoint']
     if codex.get('apiKey'):
         env['OPENAI_API_KEY'] = codex['apiKey']
-
-    lower_proxy = env.get('http_proxy') or env.get('https_proxy') or ''
-    upper_proxy = env.get('HTTP_PROXY') or env.get('HTTPS_PROXY') or ''
-    effective_proxy = DEFAULT_PROXY or lower_proxy or upper_proxy
-    if not DEFAULT_PROXY and lower_proxy and upper_proxy and lower_proxy != upper_proxy:
-        effective_proxy = lower_proxy
-
+    network = effective_network_config(cfg)
+    effective_proxy = network.get('proxy', '')
     if effective_proxy:
         env['HTTP_PROXY'] = effective_proxy
         env['HTTPS_PROXY'] = effective_proxy
@@ -84,7 +106,7 @@ def build_codex_env(cfg: dict) -> dict:
     else:
         for key in ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy']:
             env.pop(key, None)
-    effective_no_proxy = DEFAULT_NO_PROXY or env.get('no_proxy') or env.get('NO_PROXY') or '127.0.0.1,localhost,::1'
+    effective_no_proxy = network.get('noProxy', '')
     env['NO_PROXY'] = effective_no_proxy
     env['no_proxy'] = effective_no_proxy
 
@@ -95,8 +117,17 @@ def build_codex_env(cfg: dict) -> dict:
     try:
         path_parts = [p for p in (env.get('PATH') or '').split(':') if p]
         preferred = ['/usr/bin', '/usr/lib/wsl/lib']
+        node_paths: list[str] = []
+        nvm_root = Path('/home/a/.nvm/versions/node')
+        if nvm_root.exists():
+            for candidate in sorted(nvm_root.glob('*/bin'), reverse=True):
+                if (candidate / 'node').exists():
+                    node_paths.append(str(candidate))
+        windows_node = Path('/mnt/c/Program Files/nodejs')
+        if windows_node.exists():
+            node_paths.append(str(windows_node))
         new_parts: list[str] = []
-        for p in preferred + path_parts:
+        for p in preferred + node_paths + path_parts:
             if p and p not in new_parts:
                 new_parts.append(p)
         if new_parts:
@@ -108,6 +139,37 @@ def build_codex_env(cfg: dict) -> dict:
     env.setdefault('PIP_DISABLE_PIP_VERSION_CHECK', '1')
     env.setdefault('PIP_NO_INPUT', '1')
     return env
+
+
+def build_codex_agent_command(
+    cfg: dict,
+    *,
+    extra_configs: list[str] | None = None,
+) -> str:
+    tokens = [CODEX_ACP_BIN] if CODEX_ACP_BIN else []
+    codex = cfg.get('codex', {})
+    for item in extra_configs or []:
+        if item:
+            tokens += ['-c', item]
+    if codex.get('model'):
+        tokens += ['-c', f'model="{codex.get("model")}"']
+    effort = normalize_effort(codex.get('thinking'))
+    if effort:
+        tokens += ['-c', f'model_reasoning_effort="{effort}"']
+    return ' '.join(shlex.quote(x) for x in tokens) if tokens else ''
+
+
+def prepare_workspace(product_id: str, cfg: dict) -> tuple[dict, bool, str]:
+    raw_folder = cfg.get('productFolder') or '/tmp'
+    resolved_path = resolve_workspace_path(raw_folder)
+    existed = resolved_path.exists()
+    ok, detail = ensure_workspace_path(raw_folder)
+    if ok:
+        cfg['productFolder'] = detail
+        save_product_config(product_id, cfg)
+        status = 'ready' if existed else 'created'
+        return cfg, True, f'{status}: {detail}'
+    return cfg, False, f'create-failed: {raw_folder} ({detail})'
 
 
 def update_state(product_id: str, **kwargs):
@@ -315,11 +377,9 @@ def run_self_test(product_id: str) -> None:
     cfg = load_product_config(product_id)
     claw_log = d / 'logs' / 'claw.log'
     codex_log = d / 'logs' / 'codex.log'
-    product_folder = cfg.get('productFolder') or '/tmp'
     codex = cfg.get('codex', {})
     claw_eff = effective_claw_config(cfg)
-    session_name = codex.get('sessionName') or f'oc-product-{product_id}'
-    env = build_codex_env(cfg)
+    network = effective_network_config(cfg)
     checks = {}
 
     def log_claw(text: str):
@@ -407,6 +467,9 @@ def run_self_test(product_id: str) -> None:
 
     try:
         log_claw('Starting self-test.')
+        cfg, workspace_ok, workspace_detail = prepare_workspace(product_id, cfg)
+        product_folder = cfg.get('productFolder') or '/tmp'
+        env = build_codex_env(cfg)
 
         checks['agent_config'] = {
             'ok': bool(claw_eff.get('endpoint') and claw_eff.get('model')),
@@ -414,44 +477,40 @@ def run_self_test(product_id: str) -> None:
         }
         log_claw(f"Self-test agent_config: {checks['agent_config']}")
 
-        checks['agent_connection'] = probe_openai_like_endpoint(claw_eff.get('endpoint', ''), claw_eff.get('apiKey'))
+        checks['agent_connection'] = probe_openai_like_endpoint(
+            claw_eff.get('endpoint', ''),
+            claw_eff.get('apiKey'),
+            proxy=network.get('proxy'),
+            no_proxy=network.get('noProxy'),
+        )
         log_claw(f"Self-test agent_connection: {checks['agent_connection']['ok']}")
 
-        checks['product_folder'] = {'ok': Path(product_folder).exists(), 'detail': product_folder}
+        checks['product_folder'] = {'ok': workspace_ok, 'detail': workspace_detail}
         log_claw(f"Self-test product_folder: {checks['product_folder']}")
 
-        session_cmd = [str(ACPX), '--cwd', product_folder, 'codex', 'sessions', 'ensure', '--name', session_name]
-        rc, out, timed_out = run_selftest_command(session_cmd, 45)
-        log_codex(f'[taskcaptain] self-test command finished: codex_session rc={rc} timedOut={timed_out}')
+        acpx_cmd = [str(ACPX), '--version']
+        rc, out, timed_out = run_selftest_command(acpx_cmd, 15)
+        log_codex(f'[taskcaptain] self-test command finished: acpx_cli rc={rc} timedOut={timed_out}')
         if timed_out:
-            checks['codex_session'] = {'ok': False, 'detail': f'timed out after 45 seconds: {" ".join(session_cmd)}'}
+            checks['acpx_cli'] = {'ok': False, 'detail': f'timed out after 15 seconds: {" ".join(acpx_cmd)}'}
         else:
-            checks['codex_session'] = {'ok': rc == 0, 'detail': out[-500:]}
-        log_claw(f"Self-test codex_session: {checks['codex_session']['ok']}")
+            checks['acpx_cli'] = {'ok': rc == 0 and bool((out or '').strip()), 'detail': (out or '').strip()[-500:]}
+        log_claw(f"Self-test acpx_cli: {checks['acpx_cli']['ok']}")
 
-        status_cmd = [str(ACPX), '--cwd', product_folder, 'codex', 'status', '--session', session_name]
-        rc, out, timed_out = run_selftest_command(status_cmd, 20)
-        log_codex(f'[taskcaptain] self-test command finished: codex_status rc={rc} timedOut={timed_out}')
-        if timed_out:
-            checks['codex_status'] = {'ok': False, 'detail': f'timed out after 20 seconds: {" ".join(status_cmd)}'}
+        agent_bin_cmd = [str(CODEX_ACP_BIN), '--help'] if CODEX_ACP_BIN else []
+        if not agent_bin_cmd:
+            checks['codex_agent_bin'] = {'ok': False, 'detail': 'missing CODEX_ACP_BIN'}
         else:
-            detail = out[-500:]
-            if rc == 0 and 'status:' in out and 'status: no-session' not in out:
-                checks['codex_status'] = {'ok': True, 'detail': detail}
-            elif 'status: dead' in out:
-                checks['codex_status'] = {'ok': True, 'detail': detail + '\n(note: session process is dead, but this backend may still support one-shot exec successfully)'}
+            rc, out, timed_out = run_selftest_command(agent_bin_cmd, 15)
+            log_codex(f'[taskcaptain] self-test command finished: codex_agent_bin rc={rc} timedOut={timed_out}')
+            if timed_out:
+                checks['codex_agent_bin'] = {'ok': False, 'detail': f'timed out after 15 seconds: {" ".join(agent_bin_cmd)}'}
             else:
-                checks['codex_status'] = {'ok': False, 'detail': detail}
-        log_claw(f"Self-test codex_status: {checks['codex_status']['ok']}")
+                detail = (out or '').strip()[-500:]
+                checks['codex_agent_bin'] = {'ok': rc == 0 and ('Usage:' in out or 'Override a configuration value' in out), 'detail': detail}
+        log_claw(f"Self-test codex_agent_bin: {checks['codex_agent_bin']['ok']}")
 
-        effort = normalize_effort(codex.get('thinking'))
-        agent_tokens = [CODEX_ACP_BIN] if CODEX_ACP_BIN else []
-        agent_tokens += ['-c', 'sandbox_permissions=["disk-full-read-access"]']
-        if codex.get('model'):
-            agent_tokens += ['-c', f"model=\"{codex.get('model')}\""]
-        if effort:
-            agent_tokens += ['-c', f"model_reasoning_effort=\"{effort}\""]
-        agent_cmd = ' '.join(shlex.quote(x) for x in agent_tokens) if agent_tokens else ''
+        agent_cmd = build_codex_agent_command(cfg, extra_configs=['sandbox_permissions=["disk-full-read-access"]'])
         if agent_cmd:
             prompt_cmd = [str(ACPX), '--cwd', product_folder, '--approve-all', '--non-interactive-permissions', 'deny', '--agent', agent_cmd, 'exec', 'Reply with exactly SELFTEST_CODEX_OK']
         else:
@@ -465,7 +524,14 @@ def run_self_test(product_id: str) -> None:
             checks['codex_prompt'] = {'ok': rc == 0 and 'SELFTEST_CODEX_OK' in out, 'detail': out[-500:]}
         log_claw(f"Self-test codex_prompt: {checks['codex_prompt']['ok']}")
 
-        overall = checks['agent_config']['ok'] and checks['agent_connection']['ok'] and checks['product_folder']['ok'] and checks['codex_session']['ok'] and checks['codex_prompt']['ok']
+        overall = (
+            checks['agent_config']['ok']
+            and checks['agent_connection']['ok']
+            and checks['product_folder']['ok']
+            and checks['acpx_cli']['ok']
+            and checks['codex_agent_bin']['ok']
+            and checks['codex_prompt']['ok']
+        )
         record_self_test('passed' if overall else 'failed')
         append_user_claw_message(product_id, 'claw', f"Self-test finished: {'passed' if overall else 'failed'}.")
         log_claw(f"Self-test finished: {'passed' if overall else 'failed'}.")
@@ -591,283 +657,11 @@ def run_codex_command(
         time.sleep(poll_seconds)
 
 
-def summarize_user_claw_messages(st: dict, limit: int = 8) -> str:
-    user_msgs = [x.get('text', '') for x in st.get('conversations', {}).get('userClaw', []) if x.get('role') == 'user']
-    return '\n'.join(f'- {x}' for x in user_msgs[-limit:]) or '- none'
-
-
-
-def extract_terminal_token(text: str) -> str | None:
-    matches = re.findall(r'(?m)^(DELIVERED_OK|FAILED_FINAL|NEEDS_MORE_WORK)\s*$', text or '')
-    return matches[-1] if matches else None
-
-
-def extract_json_object(text: str) -> dict | None:
-    raw = (text or '').strip()
-    if not raw:
-        return None
-    fenced = re.match(r'^```(?:json)?\s*(.*?)\s*```$', raw, re.S)
-    if fenced:
-        raw = fenced.group(1).strip()
-    try:
-        obj = json.loads(raw)
-        if isinstance(obj, dict):
-            return obj
-    except Exception:
-        pass
-    decoder = json.JSONDecoder()
-    for i, ch in enumerate(raw):
-        if ch != '{':
-            continue
-        try:
-            obj, _ = decoder.raw_decode(raw[i:])
-        except Exception:
-            continue
-        if isinstance(obj, dict):
-            return obj
-    return None
-
-
-
-def stringify_for_log(value) -> str:
-    if value is None:
-        return ''
-    if isinstance(value, str):
-        return value
-    try:
-        return json.dumps(value, ensure_ascii=False)
-    except Exception:
-        try:
-            return str(value)
-        except Exception:
-            return ''
-
-
-
-def normalize_effort(value: str | None) -> str | None:
-    v = (value or '').strip().lower()
-    if v in {'low', 'medium', 'high', 'xhigh'}:
-        return v
-    return None
-
-
-def build_responses_url(base: str) -> str:
-    base = (base or '').rstrip('/')
-    if not base:
-        return ''
-    if base.endswith('/responses'):
-        return base
-    return f'{base}/responses'
-
-
-def parse_responses_output_text(parsed: dict) -> str:
-    if isinstance(parsed.get('output_text'), str):
-        return parsed.get('output_text') or ''
-    out = parsed.get('output')
-    if isinstance(out, list):
-        parts: list[str] = []
-        for item in out:
-            if not isinstance(item, dict):
-                continue
-            content = item.get('content')
-            if not isinstance(content, list):
-                continue
-            for c in content:
-                if not isinstance(c, dict):
-                    continue
-                if c.get('type') in {'output_text', 'text'}:
-                    t = c.get('text')
-                    if isinstance(t, str):
-                        parts.append(t)
-        return ''.join(parts)
-    return ''
-
-
-def openai_responses(base_url: str, api_key: str | None, model: str, input_text: str, reasoning_effort: str | None = None, timeout: int = 120) -> tuple[str, dict]:
-    url = build_responses_url(base_url)
-    if not url:
-        raise RuntimeError('missing responses base url')
-    headers = {'Content-Type': 'application/json'}
-    if api_key:
-        headers['Authorization'] = f'Bearer {api_key}'
-    payload: dict = {
-        'model': model,
-        'input': input_text,
-        'stream': False,
-    }
-    if reasoning_effort:
-        payload['reasoning'] = {'effort': reasoning_effort}
-    req = Request(url, data=json.dumps(payload).encode('utf-8'), headers=headers, method='POST')
-    with urlopen(req, timeout=timeout) as resp:
-        body = resp.read().decode('utf-8', 'ignore')
-    parsed = json.loads(body)
-    return parse_responses_output_text(parsed), parsed
-
-
-def build_chat_completions_url(base: str) -> str:
-    base = (base or '').rstrip('/')
-    if not base:
-        return ''
-    if base.endswith('/chat/completions'):
-        return base
-    return f'{base}/chat/completions'
-
-
-def infer_project_kind(cfg: dict, user_context: str = '') -> str:
-    text = ' '.join([
-        str(cfg.get('name', '')),
-        str(cfg.get('goal', '')),
-        str(user_context or ''),
-    ]).lower()
-    if any(k in text for k in ['算法', 'algorithm', '优化', 'optimization', 'theory', 'theoretical', 'idea', 'proof', 'benchmark', '性能', '复杂度', '收敛', 'search strategy']):
-        return 'algorithm_research'
-    if any(k in text for k in ['frontend', '前端', '页面', 'dashboard', 'demo', '界面', '交互', '库存', '订单', '采购', '台']):
-        return 'frontend_demo'
-    if any(k in text for k in ['api', 'backend', '后端', 'server', '服务', '数据库', '接口']):
-        return 'backend_service'
-    if any(k in text for k in ['script', 'cli', '命令行', '批处理', 'automation', '工具']):
-        return 'script_tool'
-    if any(k in text for k in ['文档', 'docs', 'readme', '手册', '教程', 'spec']):
-        return 'docs_or_spec'
-    return 'general_software'
-
-
-def project_acceptance_profile(kind: str) -> dict:
-    profiles = {
-        'frontend_demo': {
-            'delivery_bar': [
-                'Project structure exists and is non-empty.',
-                'There is a documented local startup path.',
-                'The main UI renders in Chinese (or the requested language) and is not blank.',
-                'Core pages/modules requested by the user are present.',
-                'At least one real interaction or workflow is verified.',
-                'README includes install/start/demo steps and verification notes.',
-            ],
-            'stretch_bar': [
-                'Browser-level automated acceptance coverage exists.',
-                'UI polish and advanced regression checks are present.',
-                'Extended data persistence or more advanced UX checks are covered.',
-            ],
-            'verification_focus': 'Prefer build/start/browser/http verification and key-file inspection. Do not block delivery only because stretch-bar browser automation is missing if delivery-bar evidence is already strong.',
-        },
-        'backend_service': {
-            'delivery_bar': [
-                'Service starts locally with documented instructions.',
-                'At least one key endpoint or workflow is exercised successfully.',
-                'Configuration/README is sufficient for local use.',
-                'Core data flow and expected outputs are demonstrated.',
-            ],
-            'stretch_bar': [
-                'Automated test suite coverage is added.',
-                'Load/error-handling cases are documented or tested.',
-            ],
-            'verification_focus': 'Prefer startup logs, HTTP status checks, smoke tests, and configuration correctness.',
-        },
-        'script_tool': {
-            'delivery_bar': [
-                'The tool runs locally with a documented command.',
-                'Representative input/output behavior is demonstrated.',
-                'README explains usage and limitations.',
-            ],
-            'stretch_bar': [
-                'Extra automation, packaging, or edge-case coverage is added.',
-            ],
-            'verification_focus': 'Prefer CLI execution evidence, deterministic examples, and output inspection.',
-        },
-        'docs_or_spec': {
-            'delivery_bar': [
-                'Core requested documents/specs exist and are coherent.',
-                'Structure, scope, and examples are sufficient for use.',
-            ],
-            'stretch_bar': [
-                'Extended polish, diagrams, or exhaustive examples are added.',
-            ],
-            'verification_focus': 'Prefer direct file-content inspection over build/runtime checks.',
-        },
-        'algorithm_research': {
-            'delivery_bar': [
-                'The hypothesis/idea is clearly stated.',
-                'A concrete method or algorithm design is produced.',
-                'There is an evaluation plan or experiment design.',
-                'There is at least one implementation artifact, derivation artifact, benchmark artifact, or falsification result.',
-                'The result clearly states whether the idea appears promising, inconclusive, or ineffective.',
-            ],
-            'stretch_bar': [
-                'There are broader benchmarks, stronger proofs, more baselines, or more complete ablations.',
-                'There is a stronger implementation/performance package beyond the minimum validation needed for the current idea.',
-            ],
-            'verification_focus': 'Do not treat “not fully proven” as automatic failure. For research/theory work, delivery can be a well-supported negative result, an inconclusive result, a benchmark report, a derivation, or a prototype with evidence. Judge validity of the idea, rigor of reasoning, and whether the current iteration produced meaningful evidence.',
-        },
-        'general_software': {
-            'delivery_bar': [
-                'Non-empty project artifacts exist.',
-                'There is a documented way to run or inspect the result.',
-                'Core requested capability is demonstrated with evidence.',
-            ],
-            'stretch_bar': [
-                'Additional polish, automation, or stronger testing is added.',
-            ],
-            'verification_focus': 'Prefer pragmatic evidence of use over perfection.',
-        },
-    }
-    return profiles.get(kind, profiles['general_software'])
-
-
-def openai_chat_completion(base_url: str, api_key: str | None, model: str, messages: list[dict], timeout: int = 120) -> tuple[str, dict]:
-    url = build_chat_completions_url(base_url)
-    if not url:
-        raise RuntimeError('missing chat completions base url')
-    headers = {'Content-Type': 'application/json'}
-    if api_key:
-        headers['Authorization'] = f'Bearer {api_key}'
-    payload = {
-        'model': model,
-        'messages': messages,
-        'stream': False,
-    }
-    req = Request(url, data=json.dumps(payload).encode('utf-8'), headers=headers, method='POST')
-    with urlopen(req, timeout=timeout) as resp:
-        body = resp.read().decode('utf-8', 'ignore')
-    parsed = json.loads(body)
-    choices = parsed.get('choices') or []
-    if not choices:
-        raise RuntimeError(f'no choices in chat completion response: {body[:500]}')
-    message = choices[0].get('message') or {}
-    content = message.get('content', '')
-    if isinstance(content, list):
-        parts = []
-        for item in content:
-            if isinstance(item, dict):
-                if item.get('type') == 'text':
-                    parts.append(item.get('text', ''))
-                elif 'text' in item:
-                    parts.append(str(item.get('text', '')))
-        content = ''.join(parts)
-    return str(content or ''), parsed
-
-
-def claw_identity_block(cfg: dict) -> str:
-    claw_eff = effective_claw_config(cfg)
-    return (
-        f"Supervisor identity name: {claw_eff.get('profileName')}\n"
-        f"Supervisor soul: {claw_eff.get('soul')}\n"
-        f"Supervisor skills/priorities: {claw_eff.get('skills')}\n"
-        f"Supervisor model preference: {claw_eff.get('model')}\n"
-        f"Supervisor thinking preference: {claw_eff.get('thinking')}\n"
-        "You are an independent supervisor identity that may be reused across multiple products. Codex is the implementation executor, not the same thing as you."
-    )
-
-
-
 def run_supervision_loop(product_id: str, run_id: str, stop_event: threading.Event) -> None:
     d = product_dir(product_id)
     cfg = load_product_config(product_id)
     claw_log = d / 'logs' / 'claw.log'
     codex_log = d / 'logs' / 'codex.log'
-    product_folder = cfg.get('productFolder') or '/tmp'
-    codex = cfg.get('codex', {})
-    claw_eff = effective_claw_config(cfg)
-    env = build_codex_env(cfg)
 
     def set_state(**kwargs):
         st = load_product_state(product_id)
@@ -880,6 +674,13 @@ def run_supervision_loop(product_id: str, run_id: str, stop_event: threading.Eve
 
     def log_codex(text: str):
         append_log(codex_log, f'[{now_iso()}] {text}')
+
+    cfg, workspace_ok, workspace_detail = prepare_workspace(product_id, cfg)
+    product_folder = cfg.get('productFolder') or '/tmp'
+    codex = cfg.get('codex', {})
+    claw_eff = effective_claw_config(cfg)
+    network = effective_network_config(cfg)
+    env = build_codex_env(cfg)
 
     def workspace_snapshot(max_files: int = 120, max_depth: int = 4) -> str:
         root = Path(product_folder)
@@ -1053,6 +854,8 @@ def run_supervision_loop(product_id: str, run_id: str, stop_event: threading.Eve
                 combined_input,
                 reasoning_effort=effort,
                 timeout=timeout_seconds,
+                proxy=network.get('proxy'),
+                no_proxy=network.get('noProxy'),
             )
         except Exception:
             text, raw = openai_chat_completion(
@@ -1064,6 +867,8 @@ def run_supervision_loop(product_id: str, run_id: str, stop_event: threading.Eve
                     {'role': 'user', 'content': user_prompt},
                 ],
                 timeout=timeout_seconds,
+                proxy=network.get('proxy'),
+                no_proxy=network.get('noProxy'),
             )
         usage = raw.get('usage') if isinstance(raw, dict) else None
         if usage:
@@ -1075,7 +880,13 @@ def run_supervision_loop(product_id: str, run_id: str, stop_event: threading.Eve
         return parsed, text
 
     try:
+        if not workspace_ok:
+            log_claw(f'Workspace prepare failed before run: {workspace_detail}')
+            append_user_claw_message(product_id, 'claw', f'Workspace prepare failed before run: {workspace_detail}')
+            set_state(status='failed', lastError=workspace_detail, stopRequested=False)
+            return
         log_claw(f'Starting run {run_id}. Goal: {cfg.get("goal", "")}'.strip())
+        log_claw(f'Workspace {workspace_detail}.')
         log_claw(f"Execution policy: Claw is the product manager / planner / reviewer / acceptance lead; Codex is the implementation executor inside the product folder.")
         append_user_claw_message(product_id, 'claw', f"{claw_eff.get('profileName')} started run {run_id}. I will plan, review, and decide delivery based on evidence while Codex implements.")
         append_claw_codex_message(product_id, 'claw', f"Run {run_id} opened. Claw supervisor identity: {claw_eff.get('profileName')}.")
@@ -1172,17 +983,11 @@ def run_supervision_loop(product_id: str, run_id: str, stop_event: threading.Eve
             )
             log_claw(f'Dispatching Codex implementation turn {turn}.')
             append_claw_codex_message(product_id, 'claw', f"Implementation turn {turn}. Claw brief:\n{current_codex_task[:3000]}")
-            effort = normalize_effort(codex.get('thinking'))
-            agent_tokens = [CODEX_ACP_BIN] if CODEX_ACP_BIN else []
+            extra_configs: list[str] = []
             if codex.get('maxPermission'):
                 # Full-access mode: allow Codex to run commands, write artifacts, and install deps without sandbox restrictions.
-                agent_tokens += ['-c', 'sandbox_mode="danger-full-access"']
-                agent_tokens += ['-c', 'network_access="enabled"']
-            if codex.get('model'):
-                agent_tokens += ['-c', f"model=\"{codex.get('model')}\""]
-            if effort:
-                agent_tokens += ['-c', f"model_reasoning_effort=\"{effort}\""]
-            agent_cmd = ' '.join(shlex.quote(x) for x in agent_tokens) if agent_tokens else ''
+                extra_configs += ['sandbox_mode="danger-full-access"', 'network_access="enabled"']
+            agent_cmd = build_codex_agent_command(cfg, extra_configs=extra_configs)
             if agent_cmd:
                 run_cmd = cmd_prefix + ['--agent', agent_cmd, 'exec', codex_dispatch]
             else:
@@ -1202,8 +1007,9 @@ def run_supervision_loop(product_id: str, run_id: str, stop_event: threading.Eve
                 poll_seconds=progress_poll_seconds,
             )
             log_codex(f'[taskcaptain] codex exec finished rc={rc} stopped={was_stopped}')
-            append_claw_codex_message(product_id, 'codex', out[-3000:])
-            append_legacy_codex_conversation(product_id, out[-3000:])
+            codex_dialogue_text = extract_codex_dialogue_text(out, max_chars=5000)
+            append_claw_codex_message(product_id, 'codex', codex_dialogue_text)
+            append_legacy_codex_conversation(product_id, codex_dialogue_text)
             set_active_proc(product_id, None)
             if out.strip():
                 last_codex_excerpt = out[-4000:]

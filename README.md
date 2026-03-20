@@ -267,6 +267,19 @@ chmod +x run.sh restart.sh
 http://127.0.0.1:8765
 ```
 
+### 2.1 可选：构建 Rust fastview 加速层
+
+这个辅助工具不是必需的；不构建也能运行。  
+但如果日志很大、任务很多，建议编译它，任务页会更顺畅：
+
+```bash
+curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal
+. "$HOME/.cargo/env"
+./build_fastview.sh
+```
+
+构建成功后，任务详情页会显示 `Rust 快速路径`；未构建时会自动回退到 `Python 回退`。
+
 ### 3. 可选：加载本地环境配置
 
 ```bash
@@ -276,6 +289,35 @@ source .env
 set +a
 ./run.sh
 ```
+
+---
+
+## 首次部署与代理排障
+
+### 1. 代理不再需要改代码
+
+现在代理、直连白名单、供应商端点和密钥都可以直接在 UI 中修改：
+
+- 首页创建任务时可填写 `代理地址` / `直连白名单`
+- 任务详情页可随时修改并保存 `连接设置`
+
+如果你从 `7890` 切到 `7897`，只需要改 UI 或 `.env`，不需要再改 Python 代码。
+
+### 2. 推荐做法
+
+- 对所有新任务都使用同一套代理时：在 `.env` 里设置 `PRODUCTS_UI_PROXY`
+- 只有个别任务需要特殊代理时：直接在任务详情页里改该任务的 `连接设置`
+- 本地回环地址保持直连：保留 `PRODUCTS_UI_NO_PROXY=127.0.0.1,localhost,::1`
+
+### 3. Self-Test 结果怎么判断
+
+Self-Test 现在会把问题拆开，不再把所有失败都显示成“连不上”：
+
+- `agent_connection` 失败：通常是供应商端点、密钥或代理配置问题
+- `product_folder` 失败：通常是工作目录路径或权限问题；系统会先自动创建目录
+- `acpx_cli` / `codex_agent_bin` / `codex_prompt` 失败：通常是本地执行器、Node/ACPX/Codex 环境问题，不是供应商 API 问题
+
+如果你在 WSL 中能在 Windows 下访问 API、但 WSL 下访问失败，优先检查代理是否配置到了任务或 `.env`，不要先怀疑模型端点本身。
 
 ---
 
@@ -300,10 +342,12 @@ export PRODUCTS_UI_HOST=127.0.0.1
 export PRODUCTS_UI_PORT=8765
 export PRODUCTS_UI_DEFAULT_LANG=zh
 export PRODUCTS_UI_DEFAULT_OPENAI_BASE_URL=http://127.0.0.1:8317/v1
+export PRODUCTS_UI_DEFAULT_CODEX_BASE_URL=http://127.0.0.1:8317/v1
 export PRODUCTS_UI_DEFAULT_PRODUCT_FOLDER="$PWD/workspace"
 export PRODUCTS_UI_PROXY=
 export PRODUCTS_UI_NO_PROXY=127.0.0.1,localhost,::1
 export ACPX_BIN=/absolute/path/to/acpx
+export TASKCAPTAIN_FASTVIEW_BIN=/absolute/path/to/taskcaptain-fastview
 ```
 
 ### 示例
@@ -331,6 +375,22 @@ export PRODUCTS_UI_DEFAULT_OPENAI_BASE_URL=http://127.0.0.1:8317/v1
 - 等待端口释放
 - 必要时强制结束残留进程
 - 清空日志后重新启动
+
+---
+
+## 本次结构与体验优化
+
+当前版本额外做了这些改进：
+
+- `product-live` 不再每 5 秒全量读取整个日志文件，而是只取最近一段日志尾部，任务页在大日志场景下明显更轻。
+- 新增可选 Rust `fastview` helper，用于日志尾读和工作区产物扫描；未安装时自动回退到 Python，不影响使用。
+- 任务详情页加入了：
+  - 运行信号卡片
+  - 最近产物列表
+  - 日志读取模式提示
+  - 标签页记忆
+  - 产物路径复制按钮
+- `Agent ↔ Codex` 对话区现在显示清洗后的 Codex 最终回复，原始 tool / thinking trace 留在日志区。
 
 ---
 
