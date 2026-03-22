@@ -6,6 +6,7 @@ import json
 
 try:
     from tc_core import (
+        effective_goal_text,
         effective_claw_config,
         effective_network_config,
         load_claw_profile,
@@ -18,6 +19,7 @@ try:
     from tc_ui import page_template
 except ModuleNotFoundError:
     from app.tc_core import (
+        effective_goal_text,
         effective_claw_config,
         effective_network_config,
         load_claw_profile,
@@ -37,6 +39,17 @@ def render_product_page(pid: str, lang: str) -> bytes:
     network = effective_network_config(cfg)
     live = build_product_live_payload(pid, lang)
     profile = load_claw_profile(claw_eff.get('profileId'))
+    goal_text = effective_goal_text(cfg)
+    initial_requirement = cfg.get('initialRequirement') or {}
+    initial_requirement_html = ''
+    if initial_requirement:
+        initial_requirement_html = f"""
+        <div class='rounded-xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 p-3 text-xs space-y-1'>
+          <div class='font-bold uppercase tracking-wider text-slate-400'>{html.escape(t(lang, 'initial_requirement_imported'))}</div>
+          <div><b>{html.escape(t(lang, 'initial_requirement_source'))}:</b> {html.escape(initial_requirement.get('filename', '-'))}</div>
+          <div><b>{html.escape(t(lang, 'initial_requirement_storage'))}:</b> <span class='font-mono break-all'>{html.escape(initial_requirement.get('storedRelativePath', '-'))}</span></div>
+        </div>
+        """
 
     input_cls = "w-full bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 rounded-xl px-3.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500/20 focus:border-brand-500 transition"
     label_cls = "block text-xs font-semibold mb-1 text-slate-700 dark:text-slate-300"
@@ -94,8 +107,9 @@ def render_product_page(pid: str, lang: str) -> bytes:
       <section class='rounded-2xl border border-slate-200 dark:border-zinc-800 bg-slate-50/70 dark:bg-zinc-900/30 p-4 space-y-3'>
         <div>
           <div class='text-xs font-bold uppercase tracking-wider text-slate-400 mb-1'>{html.escape(t(lang, 'goal'))}</div>
-          <div class='text-sm leading-relaxed whitespace-pre-wrap text-slate-700 dark:text-slate-300'>{html.escape(cfg.get('goal', ''))}</div>
+          <div class='text-sm leading-relaxed whitespace-pre-wrap text-slate-700 dark:text-slate-300'>{html.escape(goal_text)}</div>
         </div>
+        {initial_requirement_html}
         <div class='grid grid-cols-2 gap-2 text-xs'>
           <div class='rounded-xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 p-3'>
             <div class='text-slate-400 uppercase tracking-wider mb-1'>Agent</div>

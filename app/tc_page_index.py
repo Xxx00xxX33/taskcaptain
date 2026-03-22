@@ -15,6 +15,7 @@ try:
         DEFAULT_PROXY,
         DEFAULT_PROFILE_ID,
         I18N,
+        effective_goal_text,
         list_claw_profiles,
         list_products,
         load_claw_profile,
@@ -33,6 +34,7 @@ except ModuleNotFoundError:
         DEFAULT_PROXY,
         DEFAULT_PROFILE_ID,
         I18N,
+        effective_goal_text,
         list_claw_profiles,
         list_products,
         load_claw_profile,
@@ -42,7 +44,7 @@ except ModuleNotFoundError:
     from app.tc_ui import badge_class_for, page_template
 
 
-def render_index_page(lang: str) -> bytes:
+def render_index_page(lang: str, create_error: str = '') -> bytes:
     items = list_products()
     profiles = list_claw_profiles()
     default_profile = load_claw_profile(DEFAULT_PROFILE_ID)
@@ -55,7 +57,14 @@ def render_index_page(lang: str) -> bytes:
         pid = cfg.get('id')
         status = st.get('status', 'idle')
         is_running = status == 'running' and bool(active_run_info(pid))
-        goal_text = cfg.get('goal', '') or '-'
+        initial_requirement = cfg.get('initialRequirement') or {}
+        manual_goal = (cfg.get('goal') or '').strip()
+        if manual_goal:
+            goal_text = effective_goal_text(cfg)
+        elif initial_requirement:
+            goal_text = f"{t(lang, 'initial_requirement_imported')}: {initial_requirement.get('filename', '-')}"
+        else:
+            goal_text = '-'
         product_rows.append(
             f"""
         <label class='group flex gap-4 p-5 hover:bg-slate-50 dark:hover:bg-zinc-800/40 transition cursor-pointer' onclick="if(event.target.type!=='checkbox')window.location='/product/{pid}?lang={lang}'">
@@ -106,7 +115,16 @@ def render_index_page(lang: str) -> bytes:
     btn_primary_cls = "w-full bg-slate-900 hover:bg-black dark:bg-brand-600 dark:hover:bg-brand-500 text-white font-medium py-2.5 rounded-xl shadow-sm transition active:scale-[0.98]"
     btn_secondary_cls = "w-full px-4 py-2 font-semibold text-sm bg-white dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl shadow-sm hover:bg-slate-50 dark:hover:bg-zinc-700 transition active:scale-95"
 
+    error_html = ''
+    if create_error:
+        error_html = f"""
+<div class='mb-5 rounded-2xl border border-red-200 bg-red-50 text-red-700 px-4 py-3 text-sm dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300'>
+  {html.escape(t(lang, 'create_error_prefix'))}{html.escape(create_error)}
+</div>
+"""
+
     body = f"""
+{error_html}
 <div class='mb-6'>
   <h1 class='text-3xl font-bold tracking-tight mb-2'>{html.escape(t(lang, 'app_title'))}</h1>
   <p class='text-slate-500 dark:text-zinc-400 max-w-4xl'>{html.escape(t(lang, 'app_subtitle'))}</p>
@@ -164,15 +182,30 @@ def render_index_page(lang: str) -> bytes:
     </div>
 
     <div id='create-task-panel' data-tab-panel='dashboard-right' class='flex-1 min-h-0 overflow-y-auto p-5'>
-      <form method='post' action='/create' class='space-y-4'>
+      <form method='post' action='/create' enctype='multipart/form-data' class='space-y-4' id='create-task-form'>
         <input type='hidden' name='lang' value='{html.escape(lang)}' />
         <div>
           <label class='{label_cls} text-sm'>{html.escape(t(lang, 'product_name'))}</label>
-          <input name='name' placeholder='e.g. My Awesome App' class='{input_cls} py-2.5' />
+          <input id='create-task-name' name='name' placeholder='e.g. My Awesome App' class='{input_cls} py-2.5' />
         </div>
         <div>
           <label class='{label_cls} text-sm'>{html.escape(t(lang, 'goal'))}</label>
-          <textarea name='goal' rows='3' placeholder='{html.escape(t(lang, 'goal_placeholder'))}' class='{input_cls} py-2.5 resize-y'></textarea>
+          <textarea id='create-task-goal' name='goal' rows='3' placeholder='{html.escape(t(lang, 'goal_placeholder'))}' class='{input_cls} py-2.5 resize-y'></textarea>
+        </div>
+        <div class='bg-slate-50/50 dark:bg-zinc-800/30 border border-slate-200 dark:border-zinc-800 rounded-xl p-4 space-y-3'>
+          <div class='flex items-center justify-between gap-3'>
+            <div>
+              <label class='{label_cls} text-sm mb-0'>{html.escape(t(lang, 'initial_requirement_json'))}</label>
+              <p class='mt-1 text-xs text-slate-500 dark:text-zinc-400 leading-relaxed'>{html.escape(t(lang, 'initial_requirement_json_help'))}</p>
+            </div>
+            <span class='text-[11px] font-semibold uppercase tracking-wider text-slate-400'>JSON</span>
+          </div>
+          <input id='initial-requirement-file' type='file' name='initialRequirementFile' accept='.json,application/json' class='{input_cls} file:mr-4 file:rounded-lg file:border-0 file:bg-slate-900 file:px-3 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-black dark:file:bg-brand-600 dark:hover:file:bg-brand-500' />
+          <p class='text-xs text-slate-500 dark:text-zinc-400'>{html.escape(t(lang, 'initial_requirement_json_hint'))}</p>
+          <div class='rounded-xl border border-dashed border-slate-300 dark:border-zinc-700 bg-white/70 dark:bg-zinc-900/40 px-3 py-2.5 text-sm text-slate-600 dark:text-zinc-300'>
+            <div class='text-[11px] font-bold uppercase tracking-wider text-slate-400 mb-1'>{html.escape(t(lang, 'initial_requirement_json_preview'))}</div>
+            <div id='initial-requirement-preview'>{html.escape(t(lang, 'initial_requirement_json_empty'))}</div>
+          </div>
         </div>
         <div class='grid grid-cols-1 sm:grid-cols-2 gap-3'>
           <div>
@@ -266,5 +299,52 @@ def render_index_page(lang: str) -> bytes:
     </div>
   </aside>
 </div>
+
+<script>
+  (function() {{
+    const fileInput = document.getElementById('initial-requirement-file');
+    const preview = document.getElementById('initial-requirement-preview');
+    const nameInput = document.getElementById('create-task-name');
+    if (!fileInput || !preview) return;
+
+    const emptyText = {json.dumps(t(lang, 'initial_requirement_json_empty'))};
+    const invalidText = {json.dumps(t(lang, 'initial_requirement_json_invalid'))};
+    const readyTemplate = {json.dumps(t(lang, 'initial_requirement_json_ready', filename='__FILENAME__', size='__SIZE__'))};
+
+    function formatSize(size) {{
+      if (!Number.isFinite(size)) return '-';
+      if (size < 1024) return `${{size}} B`;
+      if (size < 1024 * 1024) return `${{(size / 1024).toFixed(1)}} KB`;
+      return `${{(size / (1024 * 1024)).toFixed(1)}} MB`;
+    }}
+
+    fileInput.addEventListener('change', async () => {{
+      const file = fileInput.files && fileInput.files[0];
+      if (!file) {{
+        preview.textContent = emptyText;
+        return;
+      }}
+      try {{
+        const raw = await file.text();
+        const parsed = JSON.parse(raw);
+        const summary = readyTemplate
+          .replace('__FILENAME__', file.name)
+          .replace('__SIZE__', formatSize(file.size));
+        const extra = [];
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {{
+          const keys = Object.keys(parsed).slice(0, 8);
+          if (keys.length) extra.push(`keys: ${{keys.join(', ')}}`);
+          const nameCandidate = parsed.name || parsed.title || parsed.taskName || parsed.productName || parsed.projectName;
+          if (!nameInput.value.trim() && typeof nameCandidate === 'string' && nameCandidate.trim()) {{
+            nameInput.value = nameCandidate.trim();
+          }}
+        }}
+        preview.textContent = extra.length ? `${{summary}}\\n${{extra.join('\\n')}}` : summary;
+      }} catch (err) {{
+        preview.textContent = invalidText;
+      }}
+    }});
+  }})();
+</script>
 """
     return page_template(t(lang, 'app_title'), body, lang, '/')

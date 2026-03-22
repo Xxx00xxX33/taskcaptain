@@ -6,9 +6,9 @@ import re
 from urllib.request import Request
 
 try:
-    from tc_core import effective_claw_config, open_url
+    from tc_core import effective_claw_config, effective_goal_text, open_url
 except ModuleNotFoundError:
-    from app.tc_core import effective_claw_config, open_url
+    from app.tc_core import effective_claw_config, effective_goal_text, open_url
 
 
 def summarize_user_claw_messages(st: dict, limit: int = 8) -> str:
@@ -180,7 +180,7 @@ def build_chat_completions_url(base: str) -> str:
 def infer_project_kind(cfg: dict, user_context: str = '') -> str:
     text = ' '.join([
         str(cfg.get('name', '')),
-        str(cfg.get('goal', '')),
+        effective_goal_text(cfg),
         str(user_context or ''),
     ]).lower()
     if any(k in text for k in ['算法', 'algorithm', '优化', 'optimization', 'theory', 'theoretical', 'idea', 'proof', 'benchmark', '性能', '复杂度', '收敛', 'search strategy']):

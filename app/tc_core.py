@@ -72,6 +72,8 @@ DEFAULT_PRODUCT_FOLDER = os.environ.get('PRODUCTS_UI_DEFAULT_PRODUCT_FOLDER', st
 DEFAULT_PROXY = os.environ.get('PRODUCTS_UI_PROXY', '').strip()
 DEFAULT_NO_PROXY = os.environ.get('PRODUCTS_UI_NO_PROXY', '127.0.0.1,localhost,::1').strip()
 DEFAULT_PROFILE_ID = 'sandrone-default'
+MAX_INITIAL_REQUIREMENT_BYTES = int(os.environ.get('TASKCAPTAIN_MAX_INITIAL_REQUIREMENT_BYTES', '262144'))
+MAX_INITIAL_REQUIREMENT_PROMPT_CHARS = int(os.environ.get('TASKCAPTAIN_MAX_INITIAL_REQUIREMENT_PROMPT_CHARS', '12000'))
 
 for p in [PRODUCTS, TRASH, CLAW_PROFILES, RUNS]:
     p.mkdir(parents=True, exist_ok=True)
@@ -92,6 +94,17 @@ I18N = {
         'product_name': '任务名称',
         'goal': '目标',
         'goal_placeholder': '这个任务要实现什么？',
+        'initial_requirement_json': '初始要求 JSON',
+        'initial_requirement_json_help': '可上传一个 .json 文件作为初始要求输入；提交后会自动保存原文件并纳入 Agent 的初始上下文。',
+        'initial_requirement_json_hint': '支持 UTF-8 JSON，建议放任务说明、结构化约束、验收标准等。',
+        'initial_requirement_json_preview': 'JSON 预览',
+        'initial_requirement_json_empty': '未选择 JSON 文件。',
+        'initial_requirement_json_ready': '已识别 JSON 文件：{filename}（{size}），提交后会自动导入初始要求。',
+        'initial_requirement_json_invalid': '文件不是有效 JSON，请检查后重新选择。',
+        'initial_requirement_imported': '已导入初始 JSON',
+        'initial_requirement_source': '源文件',
+        'initial_requirement_storage': '已保存',
+        'create_error_prefix': '创建失败：',
         'max_turns': '最大回合数',
         'max_turns_help': '每次运行最多执行多少个回合；达到上限会标记失败（默认 8）。',
         'turn_progress': '回合进度',
@@ -220,6 +233,17 @@ I18N = {
         'product_name': 'Task Name',
         'goal': 'Goal',
         'goal_placeholder': 'What should this task achieve?',
+        'initial_requirement_json': 'Initial Requirement JSON',
+        'initial_requirement_json_help': 'Upload a `.json` file as structured initial input. The original file will be saved and included in Agent context when the task is created.',
+        'initial_requirement_json_hint': 'UTF-8 JSON recommended. Good for task briefs, constraints, and acceptance criteria.',
+        'initial_requirement_json_preview': 'JSON Preview',
+        'initial_requirement_json_empty': 'No JSON file selected.',
+        'initial_requirement_json_ready': 'JSON file detected: {filename} ({size}). It will be imported into the initial requirement on submit.',
+        'initial_requirement_json_invalid': 'The selected file is not valid JSON.',
+        'initial_requirement_imported': 'Initial JSON imported',
+        'initial_requirement_source': 'Source file',
+        'initial_requirement_storage': 'Stored copy',
+        'create_error_prefix': 'Create failed: ',
         'max_turns': 'Max Turns',
         'max_turns_help': 'Max Claw↔Codex turns per run; reaching the limit will mark failed (default 8).',
         'turn_progress': 'Turn progress',
@@ -547,6 +571,9 @@ def normalize_config(cfg: dict) -> tuple[dict, bool]:
     claw = cfg.setdefault('claw', {})
     codex = cfg.setdefault('codex', {})
     network = cfg.setdefault('network', {})
+    if 'initialRequirement' in cfg and not isinstance(cfg.get('initialRequirement'), dict):
+        cfg.pop('initialRequirement', None)
+        changed = True
     defaults = {
         'endpoint': DEFAULT_AGENT_ENDPOINT,
         'apiKey': DEFAULT_AGENT_API_KEY,
@@ -683,6 +710,114 @@ def effective_network_config(cfg: dict | None = None) -> dict:
     }
 
 
+def sanitize_upload_filename(filename: str | None, fallback: str = 'initial-requirement.json') -> str:
+    raw = Path((filename or '').strip()).name.strip() or fallback
+    safe = re.sub(r'[^A-Za-z0-9._-]+', '-', raw).strip('-.')
+    if not safe:
+        safe = fallback
+    if not safe.lower().endswith('.json'):
+        safe += '.json'
+    return safe
+
+
+def extract_suggested_name_from_json(payload) -> str:
+    if not isinstance(payload, dict):
+        return ''
+    for key in ['name', 'title', 'taskName', 'task_name', 'productName', 'product_name', 'projectName', 'project_name', 'ideaName', 'idea_name']:
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ''
+
+
+def parse_initial_requirement_upload(upload: dict | None) -> dict | None:
+    if not upload:
+        return None
+    raw_bytes = upload.get('content') or b''
+    if not raw_bytes:
+        return None
+    if len(raw_bytes) > MAX_INITIAL_REQUIREMENT_BYTES:
+        raise ValueError(f'Initial requirement JSON exceeds {MAX_INITIAL_REQUIREMENT_BYTES} bytes.')
+
+    filename = sanitize_upload_filename(upload.get('filename'))
+    try:
+        raw_text = raw_bytes.decode('utf-8-sig')
+    except UnicodeDecodeError:
+        raise ValueError('Initial requirement JSON must be UTF-8 encoded.')
+
+    try:
+        payload = json.loads(raw_text)
+    except Exception as exc:
+        raise ValueError(f'Initial requirement file must be valid JSON: {exc}')
+
+    pretty_json = json.dumps(payload, ensure_ascii=False, indent=2)
+    prompt_payload = pretty_json
+    truncated = False
+    if len(prompt_payload) > MAX_INITIAL_REQUIREMENT_PROMPT_CHARS:
+        prompt_payload = (
+            prompt_payload[:MAX_INITIAL_REQUIREMENT_PROMPT_CHARS].rstrip()
+            + '\n... (truncated in prompt; full file is saved under inputs/)'
+        )
+        truncated = True
+
+    top_level_keys = [str(x) for x in list(payload.keys())[:12]] if isinstance(payload, dict) else []
+    prompt_text = (
+        f"Imported initial requirement JSON file: {filename}\n"
+        f"Structured payload:\n{prompt_payload}"
+    )
+    return {
+        'filename': filename,
+        'contentType': (upload.get('content_type') or 'application/json').strip() or 'application/json',
+        'sizeBytes': len(raw_bytes),
+        'uploadedAt': now_iso(),
+        'topLevelType': type(payload).__name__,
+        'topLevelKeys': top_level_keys,
+        'suggestedName': extract_suggested_name_from_json(payload),
+        'promptText': prompt_text,
+        'prettyJson': pretty_json,
+        'truncatedInPrompt': truncated,
+    }
+
+
+def persist_initial_requirement_upload(base_dir: Path, parsed_upload: dict | None) -> dict | None:
+    if not parsed_upload:
+        return None
+    inputs_dir = base_dir / 'inputs'
+    inputs_dir.mkdir(parents=True, exist_ok=True)
+    filename = sanitize_upload_filename(parsed_upload.get('filename'))
+    target = inputs_dir / filename
+    stem = target.stem
+    suffix = target.suffix
+    i = 2
+    while target.exists():
+        target = inputs_dir / f'{stem}-{i}{suffix}'
+        i += 1
+    target.write_text((parsed_upload.get('prettyJson') or '').rstrip() + '\n', encoding='utf-8')
+    meta = {
+        'source': 'json-upload',
+        'filename': filename,
+        'storedRelativePath': str(target.relative_to(base_dir)),
+        'contentType': parsed_upload.get('contentType', 'application/json'),
+        'sizeBytes': int(parsed_upload.get('sizeBytes') or 0),
+        'uploadedAt': parsed_upload.get('uploadedAt') or now_iso(),
+        'topLevelType': parsed_upload.get('topLevelType') or 'unknown',
+        'topLevelKeys': parsed_upload.get('topLevelKeys') or [],
+        'suggestedName': parsed_upload.get('suggestedName') or '',
+        'promptText': parsed_upload.get('promptText') or '',
+        'truncatedInPrompt': bool(parsed_upload.get('truncatedInPrompt')),
+    }
+    return meta
+
+
+def effective_goal_text(cfg: dict | None) -> str:
+    cfg = cfg if isinstance(cfg, dict) else {}
+    manual_goal = (cfg.get('goal') or '').strip()
+    imported_goal = ((cfg.get('initialRequirement') or {}).get('promptText') or '').strip()
+    if manual_goal and imported_goal:
+        return manual_goal + '\n\n' + imported_goal
+    return manual_goal or imported_goal
+
+
 def list_products():
     items = []
     for d in sorted(PRODUCTS.iterdir() if PRODUCTS.exists() else []):
@@ -770,9 +905,13 @@ def probe_openai_like_endpoint(
         return {'ok': False, 'detail': str(e)}
 
 
-def create_product(form: dict[str, str]) -> str:
+def create_product(form: dict[str, str], initial_requirement_upload: dict | None = None) -> str:
+    parsed_upload = parse_initial_requirement_upload(initial_requirement_upload)
+    raw_name = form.get('name', '')
+    if parsed_upload and not str(raw_name or '').strip() and parsed_upload.get('suggestedName'):
+        raw_name = parsed_upload.get('suggestedName', '')
     name, product_folder, inferred_from_name_path = normalize_product_identity(
-        form.get('name', ''),
+        raw_name,
         form.get('productFolder', ''),
     )
     try:
@@ -791,6 +930,7 @@ def create_product(form: dict[str, str]) -> str:
         d = product_dir(product_id)
         i += 1
     d.mkdir(parents=True, exist_ok=True)
+    initial_requirement_meta = persist_initial_requirement_upload(d, parsed_upload)
 
     profile = load_claw_profile(form.get('clawProfileId') or DEFAULT_PROFILE_ID)
     cfg = {
@@ -823,6 +963,8 @@ def create_product(form: dict[str, str]) -> str:
         },
         'createdAt': now_iso(),
     }
+    if initial_requirement_meta:
+        cfg['initialRequirement'] = initial_requirement_meta
     st = {
         'status': 'idle',
         'createdAt': now_iso(),
@@ -847,6 +989,12 @@ def create_product(form: dict[str, str]) -> str:
         'role': 'claw',
         'text': f"Agent profile '{profile.get('name')}' attached to this product. Ready for user instructions.",
     })
+    if initial_requirement_meta:
+        st.setdefault('conversations', {}).setdefault('userClaw', []).append({
+            'ts': now_iso(),
+            'role': 'claw',
+            'text': f"Structured initial requirement JSON '{initial_requirement_meta.get('filename')}' was imported and added to the starting context.",
+        })
     save_product_config(product_id, cfg)
     save_product_state(product_id, st)
     workspace_ok, workspace_detail = ensure_workspace_path(product_folder)

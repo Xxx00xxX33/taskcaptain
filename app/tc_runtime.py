@@ -23,6 +23,7 @@ try:
         SELF_TEST_LOCK,
         append_log,
         effective_claw_config,
+        effective_goal_text,
         effective_network_config,
         ensure_workspace_path,
         load_claw_profile,
@@ -61,6 +62,7 @@ except ModuleNotFoundError:
         SELF_TEST_LOCK,
         append_log,
         effective_claw_config,
+        effective_goal_text,
         effective_network_config,
         ensure_workspace_path,
         load_claw_profile,
@@ -679,6 +681,7 @@ def run_supervision_loop(product_id: str, run_id: str, stop_event: threading.Eve
     product_folder = cfg.get('productFolder') or '/tmp'
     codex = cfg.get('codex', {})
     claw_eff = effective_claw_config(cfg)
+    goal_text = effective_goal_text(cfg)
     network = effective_network_config(cfg)
     env = build_codex_env(cfg)
 
@@ -800,7 +803,7 @@ def run_supervision_loop(product_id: str, run_id: str, stop_event: threading.Eve
             if not files:
                 return (
                     f"Work on the algorithm/research task '{cfg.get('name')}' inside the current working directory.\n"
-                    f"Goal: {cfg.get('goal')}\n"
+                    f"Goal: {goal_text}\n"
                     "The workspace is empty. First create concrete research artifacts immediately instead of only discussing ideas.\n"
                     "Create at minimum: README.md plus one or more of: notes.md, experiment_plan.md, benchmark.py, prototype.py, analysis.md.\n"
                     "Your task is to make the idea testable: formalize the hypothesis, define success/failure criteria, add a benchmark or experiment scaffold, and produce an initial implementation/analysis artifact.\n"
@@ -809,14 +812,14 @@ def run_supervision_loop(product_id: str, run_id: str, stop_event: threading.Eve
                 )
             return (
                 f"Continue the algorithm/research task '{cfg.get('name')}' in the current working directory.\n"
-                f"Goal: {cfg.get('goal')}\n"
+                f"Goal: {goal_text}\n"
                 "Prefer producing stronger evidence over polishing prose: improve the prototype, run benchmarks, tighten reasoning, compare alternatives, or document why the idea does or does not work.\n"
                 "Reply with a concise summary of CHANGES, VERIFICATION, and REMAINING blockers."
             )
         if not files:
             return (
                 f"Build the smallest runnable demo for '{cfg.get('name')}' inside the current working directory.\n"
-                f"Goal: {cfg.get('goal')}\n"
+                f"Goal: {goal_text}\n"
                 "The workspace is empty. Your priority is to create real files immediately instead of planning only.\n"
                 "Create at minimum: README.md, index.html, app.js, styles.css.\n"
                 "Prefer a static implementation with seeded demo data unless a backend is clearly required by the goal.\n"
@@ -824,7 +827,7 @@ def run_supervision_loop(product_id: str, run_id: str, stop_event: threading.Eve
             )
         return (
             f"Continue implementing '{cfg.get('name')}' in the current working directory.\n"
-            f"Goal: {cfg.get('goal')}\n"
+            f"Goal: {goal_text}\n"
             "Read the existing workspace first, then make the highest-value next changes.\n"
             "Run only bounded verification commands.\n"
             "Reply with a concise summary of CHANGES, VERIFICATION, and REMAINING blockers."
@@ -885,7 +888,7 @@ def run_supervision_loop(product_id: str, run_id: str, stop_event: threading.Eve
             append_user_claw_message(product_id, 'claw', f'Workspace prepare failed before run: {workspace_detail}')
             set_state(status='failed', lastError=workspace_detail, stopRequested=False)
             return
-        log_claw(f'Starting run {run_id}. Goal: {cfg.get("goal", "")}'.strip())
+        log_claw(f'Starting run {run_id}. Goal: {goal_text}'.strip())
         log_claw(f'Workspace {workspace_detail}.')
         log_claw(f"Execution policy: Claw is the product manager / planner / reviewer / acceptance lead; Codex is the implementation executor inside the product folder.")
         append_user_claw_message(product_id, 'claw', f"{claw_eff.get('profileName')} started run {run_id}. I will plan, review, and decide delivery based on evidence while Codex implements.")
@@ -911,7 +914,7 @@ def run_supervision_loop(product_id: str, run_id: str, stop_event: threading.Eve
             f"Stage: initial_planning\n"
             f"Project kind: {project_kind}\n"
             f"Product name: {cfg.get('name')}\n"
-            f"Goal: {cfg.get('goal')}\n"
+            f"Goal: {goal_text}\n"
             f"Codex MaxPermission: {bool(codex.get('maxPermission'))}\n"
             f"User requests so far:\n{user_context}\n\n"
             f"Current workspace snapshot:\n{initial_snapshot}\n\n"
@@ -968,7 +971,7 @@ def run_supervision_loop(product_id: str, run_id: str, stop_event: threading.Eve
             before_snapshot = workspace_snapshot()
             codex_dispatch = (
                 f"You are Codex, the implementation executor for task '{cfg.get('name')}'.\n"
-                f"Goal: {cfg.get('goal')}\n"
+                f"Goal: {goal_text}\n"
                 f"Work only inside: {product_folder}\n"
                 "Claw is your product manager and acceptance lead. Follow Claw's brief exactly.\n"
                 "Do real implementation work in files, not planning-only output.\n"
@@ -1027,7 +1030,7 @@ def run_supervision_loop(product_id: str, run_id: str, stop_event: threading.Eve
                 f"Stage: review_after_codex_turn\n"
                 f"Project kind: {project_kind}\n"
                 f"Product name: {cfg.get('name')}\n"
-                f"Goal: {cfg.get('goal')}\n"
+                f"Goal: {goal_text}\n"
                 f"Codex MaxPermission: {bool(codex.get('maxPermission'))}\n"
                 f"Turn: {turn}\n"
                 f"Known acceptance checks: {json.dumps(acceptance_checks, ensure_ascii=False)}\n"

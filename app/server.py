@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import json
+from email.parser import BytesParser
+from email.policy import default
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, quote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 # When launched as `python3 app/server.py`, imports resolve as top-level sibling modules.
 # When imported from elsewhere, fall back to `app.*` package imports.
@@ -64,11 +66,49 @@ except ModuleNotFoundError:  # pragma: no cover
 
 
 class Handler(BaseHTTPRequestHandler):
+    def parse_post_payload(self):
+        length = int(self.headers.get('Content-Length', '0'))
+        raw_body = self.rfile.read(length)
+        content_type = (self.headers.get('Content-Type') or '').strip()
+
+        form_lists: dict[str, list[str]] = {}
+        files: dict[str, list[dict]] = {}
+
+        if content_type.lower().startswith('multipart/form-data'):
+            header_blob = f'Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n'.encode('utf-8')
+            message = BytesParser(policy=default).parsebytes(header_blob + raw_body)
+            for part in message.iter_parts():
+                if part.get_content_disposition() != 'form-data':
+                    continue
+                name = part.get_param('name', header='content-disposition')
+                if not name:
+                    continue
+                filename = part.get_filename()
+                payload = part.get_payload(decode=True) or b''
+                if filename:
+                    files.setdefault(name, []).append({
+                        'filename': filename,
+                        'content_type': part.get_content_type(),
+                        'content': payload,
+                    })
+                    continue
+                charset = part.get_content_charset() or 'utf-8'
+                form_lists.setdefault(name, []).append(payload.decode(charset, 'replace'))
+        else:
+            raw_text = raw_body.decode('utf-8')
+            parsed_form = parse_qs(raw_text)
+            form_lists = {k: list(v) for k, v in parsed_form.items()}
+
+        form = {k: v[0] for k, v in form_lists.items() if v}
+        return form, form_lists, files
+
     def do_GET(self):
         parsed = urlparse(self.path)
-        lang = normalize_lang(parse_qs(parsed.query).get('lang', [DEFAULT_LANG])[0])
+        query = parse_qs(parsed.query)
+        lang = normalize_lang(query.get('lang', [DEFAULT_LANG])[0])
         if parsed.path == '/':
-            return self.send_html(render_index_page(lang))
+            create_error = unquote(query.get('createError', [''])[0])
+            return self.send_html(render_index_page(lang, create_error=create_error))
         if parsed.path.startswith('/product/'):
             pid = parsed.path.split('/')[-1]
             return self.send_html(render_product_page(pid, lang))
@@ -85,14 +125,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urlparse(self.path)
-        length = int(self.headers.get('Content-Length', '0'))
-        raw = self.rfile.read(length).decode('utf-8')
-        parsed_form = parse_qs(raw)
-        form = {k: v[0] for k, v in parsed_form.items()}
+        form, form_lists, files = self.parse_post_payload()
         lang = normalize_lang(form.get('lang'))
 
         if parsed.path == '/create':
-            pid = create_product(form)
+            upload = (files.get('initialRequirementFile') or [None])[0]
+            try:
+                pid = create_product(form, initial_requirement_upload=upload)
+            except ValueError as exc:
+                self.redirect(f'/?lang={lang}&createError={str(exc)}')
+                return
             self.redirect(f'/product/{pid}?lang={lang}')
             return
         if parsed.path == '/profiles/create':
@@ -101,7 +143,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == '/bulk-delete':
-            for pid in parsed_form.get('productIds', []):
+            for pid in form_lists.get('productIds', []):
                 try:
                     delete_product(pid)
                 except Exception:
